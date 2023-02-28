@@ -830,12 +830,23 @@ func (s *sharedOp) CacheMap(ctx context.Context, index int) (resp *cacheMapResp,
 					Digest:        s.st.vtx.Digest(),
 					Name:          s.st.vtx.Name(),
 					ProgressGroup: s.st.vtx.Options().ProgressGroup,
+					StableDigest:  res.Digest,
 				}
+				s.st.clientVertex.StableDigest = res.Digest
 				s.cacheRes = append(s.cacheRes, res)
 				s.cacheDone = done
 			}
 			s.cacheErr = err
 		}
+
+		{
+			// DEPOT: report stable digest to cli.
+			pw, _, _ := progress.NewFromContext(ctx)
+			id := identity.NewID()
+			pw.Write(id, s.st.clientVertex)
+			pw.Close()
+		}
+
 		return s.cacheRes, err
 	})
 	if err != nil {

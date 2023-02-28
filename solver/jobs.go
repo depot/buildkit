@@ -839,12 +839,10 @@ func (s *sharedOp) CacheMap(ctx context.Context, index int) (resp *cacheMapResp,
 			s.cacheErr = err
 		}
 
-		{
+		if s.st.clientVertex.StableDigest.String() != "" {
 			// DEPOT: report stable digest to cli.
-			pw, _, _ := progress.NewFromContext(ctx)
 			id := identity.NewID()
-			pw.Write(id, s.st.clientVertex)
-			pw.Close()
+			s.st.mpw.Write(id, s.st.clientVertex)
 		}
 
 		return s.cacheRes, err

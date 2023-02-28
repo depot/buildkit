@@ -124,6 +124,11 @@ message Vertex {
 	google.protobuf.Timestamp completed = 6 [(gogoproto.stdtime) = true ];
 	string error = 7; // typed errors?
 	pb.ProgressGroup progressGroup = 8;
+
+	string stableDigest = 9999 [
+		(gogoproto.customtype) = "github.com/opencontainers/go-digest.Digest",
+		(gogoproto.nullable) = false
+	];
 }
 
 message VertexStatus {

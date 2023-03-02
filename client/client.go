@@ -13,6 +13,7 @@ import (
 	"github.com/containerd/containerd/defaults"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client/connhelper"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/grpchijack"
 	"github.com/moby/buildkit/util/appdefaults"
@@ -146,6 +147,8 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 	gopts = append(gopts, grpc.WithChainUnaryInterceptor(unary...))
 	gopts = append(gopts, grpc.WithChainStreamInterceptor(stream...))
 	gopts = append(gopts, customDialOptions...)
+
+	gopts = append(gopts, grpc.WithKeepaliveParams(depot.LoadKeepaliveClientParams()))
 
 	conn, err := grpc.DialContext(ctx, address, gopts...)
 	if err != nil {

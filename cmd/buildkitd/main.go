@@ -33,6 +33,7 @@ import (
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	"github.com/moby/buildkit/control"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/frontend"
 	dockerfile "github.com/moby/buildkit/frontend/dockerfile/builder"
@@ -238,6 +239,10 @@ func main() {
 		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor)
 
 		opts := []grpc.ServerOption{grpc.UnaryInterceptor(unary), grpc.StreamInterceptor(stream)}
+
+		opts = append(opts, grpc.KeepaliveEnforcementPolicy(depot.LoadKeepaliveEnforcementPolicy()))
+		opts = append(opts, grpc.KeepaliveParams(depot.LoadKeepaliveServerParams()))
+
 		server := grpc.NewServer(opts...)
 
 		// relative path does not work with nightlyone/lockfile

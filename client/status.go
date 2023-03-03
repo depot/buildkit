@@ -23,7 +23,6 @@ func NewSolveStatus(resp *controlapi.StatusResponse) *SolveStatus {
 			Error:         v.Error,
 			Cached:        v.Cached,
 			ProgressGroup: v.ProgressGroup,
-			StableDigest:  v.StableDigest,
 		})
 	}
 	for _, v := range resp.Statuses {
@@ -75,7 +74,6 @@ func (ss *SolveStatus) Marshal() (out []*controlapi.StatusResponse) {
 				Error:         v.Error,
 				Cached:        v.Cached,
 				ProgressGroup: v.ProgressGroup,
-				StableDigest:  v.StableDigest,
 			})
 		}
 		for _, v := range ss.Statuses {

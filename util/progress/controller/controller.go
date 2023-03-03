@@ -23,7 +23,6 @@ type Controller struct {
 	Name          string
 	WriterFactory progress.WriterFactory
 	ProgressGroup *pb.ProgressGroup
-	StableDigest  digest.Digest
 }
 
 var _ progress.Controller = &Controller{}
@@ -46,7 +45,6 @@ func (c *Controller) Start(ctx context.Context) (context.Context, func(error)) {
 				Name:          c.Name,
 				Started:       c.started,
 				ProgressGroup: c.ProgressGroup,
-				StableDigest:  c.StableDigest,
 			})
 		}
 	}
@@ -68,7 +66,6 @@ func (c *Controller) Start(ctx context.Context) (context.Context, func(error)) {
 					Completed:     &now,
 					Error:         errString,
 					ProgressGroup: c.ProgressGroup,
-					StableDigest:  c.StableDigest,
 				})
 			}
 			c.writer.Close()

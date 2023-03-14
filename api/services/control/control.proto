@@ -73,12 +73,8 @@ message SolveRequest {
 	bool Internal = 11; // Internal builds are not recorded in build history
 	moby.buildkit.v1.sourcepolicy.Policy SourcePolicy = 12;
 
+	// Locations to export builds to.
 	repeated Exporter exporters = 13;
-}
-
-message Exporter {
-	string name = 1;
-	map<string, string> attrs = 2;
 }
 
 message CacheOptions {

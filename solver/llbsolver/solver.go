@@ -543,35 +543,48 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	cacheExporters, inlineCacheExporter := splitCacheExporters(exp.CacheExporters)
 
+	var mu sync.Mutex // protects exporterResponses  and descRefs
 	exporterResponses := make(map[string]string)
-	for _, exporter := range exp.BuildExporters {
-		e := exporter.Exporter
-		meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range meta {
-			inp.AddMeta(k, v)
-		}
 
-		if err := inBuilderContext(ctx, j, e.Name(), j.SessionID+"-export", func(ctx context.Context, _ session.Group) error {
-			exporterResponse, descRef, err := e.Export(ctx, inp, j.SessionID)
-			if err != nil {
-				return err
-			}
+	for i, exporter := range exp.BuildExporters {
+		func(exporter BuildExporter, i int) {
+			// TODO: Are there races here?
+			eg.Go(
+				func() error {
+					e := exporter.Exporter
+					meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
+					if err != nil {
+						return err
+					}
+					for k, v := range meta {
+						inp.AddMeta(k, v)
+					}
 
-			if descRef != nil {
-				descRefs = append(descRefs, descRef)
-			}
+					return inBuilderContext(ctx, j, e.Name(), j.SessionID+"-export", func(ctx context.Context, _ session.Group) error {
+						exporterResponse, descRef, err := e.Export(ctx, inp, j.SessionID)
+						if err != nil {
+							return err
+						}
 
-			// merge exporter response into exporterResponses
-			for k, v := range exporterResponse {
-				exporterResponses[k] = v
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+						mu.Lock()
+						defer mu.Unlock()
+
+						if descRef != nil {
+							descRefs = append(descRefs, descRef)
+						}
+
+						// merge exporter response into exporterResponses
+						for k, v := range exporterResponse {
+							exporterResponses[k] = v
+						}
+						return nil
+					})
+				})
+		}(exporter, i)
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
 	}
 
 	cacheExporterResponse, err := runCacheExporters(ctx, cacheExporters, j, cached, inp)

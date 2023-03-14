@@ -20,7 +20,6 @@ import (
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	controlgateway "github.com/moby/buildkit/control/gateway"
-	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/util/epoch"
 	"github.com/moby/buildkit/frontend"
 	"github.com/moby/buildkit/frontend/attestations"
@@ -319,7 +318,6 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		time.AfterFunc(time.Second, c.throttledGC)
 	}()
 
-	var expi exporter.ExporterInstance
 	// TODO: multiworker
 	// This is actually tricky, as the exporter should come from the worker that has the returned reference. We may need to delay this so that the solver loads this.
 	w, err := c.opt.WorkerController.GetDefault()
@@ -346,14 +344,22 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		}
 	}
 
-	if req.Exporter != "" {
-		exp, err := w.Exporter(req.Exporter, c.opt.SessionManager)
+	buildExporters := make([]llbsolver.BuildExporter, len(req.Exporters))
+	for i, exporter := range req.Exporters {
+		exp, err := w.Exporter(exporter.Type, c.opt.SessionManager)
 		if err != nil {
 			return nil, err
 		}
-		expi, err = exp.Resolve(ctx, req.ExporterAttrs)
+
+		exporterInstance, err := exp.Resolve(ctx, exporter.Attrs)
 		if err != nil {
 			return nil, err
+		}
+
+		buildExporters[i] = llbsolver.BuildExporter{
+			Type:     exporter.Type,
+			Attrs:    exporter.Attrs,
+			Exporter: exporterInstance,
 		}
 	}
 
@@ -437,10 +443,8 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		FrontendInputs: req.FrontendInputs,
 		CacheImports:   cacheImports,
 	}, llbsolver.ExporterRequest{
-		Exporter:       expi,
+		BuildExporters: buildExporters,
 		CacheExporters: cacheExporters,
-		Type:           req.Exporter,
-		Attrs:          req.ExporterAttrs,
 	}, req.Entitlements, procs, req.Internal, req.SourcePolicy)
 	if err != nil {
 		return nil, err

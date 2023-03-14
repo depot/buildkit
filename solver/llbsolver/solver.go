@@ -51,10 +51,14 @@ const (
 )
 
 type ExporterRequest struct {
-	Type           string
-	Attrs          map[string]string
-	Exporter       exporter.ExporterInstance
+	BuildExporters []BuildExporter
 	CacheExporters []RemoteCacheExporter
+}
+
+type BuildExporter struct {
+	Type     string
+	Attrs    map[string]string
+	Exporter exporter.ExporterInstance
 }
 
 type RemoteCacheExporter struct {
@@ -160,11 +164,14 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 		CreatedAt:     &st,
 	}
 
-	if exp.Type != "" {
-		rec.Exporters = []*controlapi.Exporter{{
+	// Record the exporters used for this build.
+	rec.Exporters = make([]*controlapi.Exporter, len(exp.BuildExporters))
+
+	for i, exp := range exp.BuildExporters {
+		rec.Exporters[i] = &controlapi.Exporter{
 			Type:  exp.Type,
 			Attrs: exp.Attrs,
-		}}
+		}
 	}
 
 	if err := s.history.Update(ctx, &controlapi.BuildHistoryEvent{
@@ -409,15 +416,18 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	var res *frontend.Result
 	var resProv *Result
-	var descref exporter.DescriptorReference
+	descRefs := []exporter.DescriptorReference{}
 
 	var releasers []func()
 	defer func() {
 		for _, f := range releasers {
 			f()
 		}
-		if descref != nil {
-			descref.Release()
+
+		for _, descref := range descRefs {
+			if descref != nil {
+				descref.Release()
+			}
 		}
 	}()
 
@@ -430,7 +440,12 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			return nil, err1
 		}
 		defer func() {
-			err = rec(resProv, descref, err)
+			for _, descref := range descRefs {
+				err = rec(resProv, descref, err)
+				if err != nil {
+					break // TODO: Unknown if rec must run for all descrefs
+				}
+			}
 		}()
 	}
 
@@ -528,8 +543,9 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	cacheExporters, inlineCacheExporter := splitCacheExporters(exp.CacheExporters)
 
-	var exporterResponse map[string]string
-	if e := exp.Exporter; e != nil {
+	exporterResponses := make(map[string]string)
+	for _, exporter := range exp.BuildExporters {
+		e := exporter.Exporter
 		meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
 		if err != nil {
 			return nil, err
@@ -539,8 +555,20 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		}
 
 		if err := inBuilderContext(ctx, j, e.Name(), j.SessionID+"-export", func(ctx context.Context, _ session.Group) error {
-			exporterResponse, descref, err = e.Export(ctx, inp, j.SessionID)
-			return err
+			exporterResponse, descRef, err := e.Export(ctx, inp, j.SessionID)
+			if err != nil {
+				return err
+			}
+
+			if descRef != nil {
+				descRefs = append(descRefs, descRef)
+			}
+
+			// merge exporter response into exporterResponses
+			for k, v := range exporterResponse {
+				exporterResponses[k] = v
+			}
+			return nil
 		}); err != nil {
 			return nil, err
 		}
@@ -551,26 +579,22 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return nil, err
 	}
 
-	if exporterResponse == nil {
-		exporterResponse = make(map[string]string)
-	}
-
 	for k, v := range res.Metadata {
 		if strings.HasPrefix(k, "frontend.") {
-			exporterResponse[k] = string(v)
+			exporterResponses[k] = string(v)
 		}
 		if strings.HasPrefix(k, exptypes.ExporterBuildInfo) {
-			exporterResponse[k] = base64.StdEncoding.EncodeToString(v)
+			exporterResponses[k] = base64.StdEncoding.EncodeToString(v)
 		}
 	}
 	for k, v := range cacheExporterResponse {
 		if strings.HasPrefix(k, "cache.") {
-			exporterResponse[k] = v
+			exporterResponses[k] = v
 		}
 	}
 
 	return &client.SolveResponse{
-		ExporterResponse: exporterResponse,
+		ExporterResponse: exporterResponses,
 	}, nil
 }
 

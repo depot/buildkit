@@ -125,13 +125,15 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 		return nil, err
 	}
 
-	var ex ExportEntry
-	if len(opt.Exports) > 1 {
-		return nil, errors.New("currently only single Exports can be specified")
-	}
-	if len(opt.Exports) == 1 {
-		ex = opt.Exports[0]
-	}
+	/*
+		var ex ExportEntry
+		if len(opt.Exports) > 1 {
+			return nil, errors.New("currently only single Exports can be specified")
+		}
+		if len(opt.Exports) == 1 {
+			ex = opt.Exports[0]
+		}
+	*/
 
 	storesToUpdate := []string{}
 
@@ -156,53 +158,54 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			contentStores[key2] = store
 		}
 
-		var supportFile bool
-		var supportDir bool
-		switch ex.Type {
-		case ExporterLocal:
-			supportDir = true
-		case ExporterTar:
-			supportFile = true
-		case ExporterOCI, ExporterDocker:
-			supportDir = ex.OutputDir != ""
-			supportFile = ex.Output != nil
-		}
-
-		if supportFile && supportDir {
-			return nil, errors.Errorf("both file and directory output is not support by %s exporter", ex.Type)
-		}
-		if !supportFile && ex.Output != nil {
-			return nil, errors.Errorf("output file writer is not supported by %s exporter", ex.Type)
-		}
-		if !supportDir && ex.OutputDir != "" {
-			return nil, errors.Errorf("output directory is not supported by %s exporter", ex.Type)
-		}
-
-		if supportFile {
-			if ex.Output == nil {
-				return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
-			}
-			s.Allow(filesync.NewFSSyncTarget(ex.Output))
-		}
-		if supportDir {
-			if ex.OutputDir == "" {
-				return nil, errors.Errorf("output directory is required for %s exporter", ex.Type)
-			}
+		/*
+			var supportFile bool
+			var supportDir bool
 			switch ex.Type {
+			case ExporterLocal:
+				supportDir = true
+			case ExporterTar:
+				supportFile = true
 			case ExporterOCI, ExporterDocker:
-				if err := os.MkdirAll(ex.OutputDir, 0755); err != nil {
-					return nil, err
-				}
-				cs, err := contentlocal.NewStore(ex.OutputDir)
-				if err != nil {
-					return nil, err
-				}
-				contentStores["export"] = cs
-				storesToUpdate = append(storesToUpdate, ex.OutputDir)
-			default:
-				s.Allow(filesync.NewFSSyncTargetDir(ex.OutputDir))
+				supportDir = ex.OutputDir != ""
+				supportFile = ex.Output != nil
 			}
-		}
+
+			if supportFile && supportDir {
+				return nil, errors.Errorf("both file and directory output is not support by %s exporter", ex.Type)
+			}
+			if !supportFile && ex.Output != nil {
+				return nil, errors.Errorf("output file writer is not supported by %s exporter", ex.Type)
+			}
+			if !supportDir && ex.OutputDir != "" {
+				return nil, errors.Errorf("output directory is not supported by %s exporter", ex.Type)
+			}
+
+			if supportFile {
+				if ex.Output == nil {
+					return nil, errors.Errorf("output file writer is required for %s exporter", ex.Type)
+				}
+				s.Allow(filesync.NewFSSyncTarget(ex.Output))
+			}
+			if supportDir {
+				if ex.OutputDir == "" {
+					return nil, errors.Errorf("output directory is required for %s exporter", ex.Type)
+				}
+				switch ex.Type {
+				case ExporterOCI, ExporterDocker:
+					if err := os.MkdirAll(ex.OutputDir, 0755); err != nil {
+						return nil, err
+					}
+					cs, err := contentlocal.NewStore(ex.OutputDir)
+					if err != nil {
+						return nil, err
+					}
+					contentStores["export"] = cs
+					storesToUpdate = append(storesToUpdate, ex.OutputDir)
+				default:
+					s.Allow(filesync.NewFSSyncTargetDir(ex.OutputDir))
+				}
+			}*/
 
 		if len(contentStores) > 0 {
 			s.Allow(sessioncontent.NewAttachable(contentStores))
@@ -255,11 +258,17 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			frontendInputs[key] = def.ToPB()
 		}
 
+		exporters := make([]*controlapi.Exporter, len(opt.Exports))
+		for i := range opt.Exports {
+			exporters[i] = &controlapi.Exporter{
+				Type:  opt.Exports[i].Type,
+				Attrs: opt.Exports[i].Attrs,
+			}
+		}
+
 		resp, err := c.ControlClient().Solve(ctx, &controlapi.SolveRequest{
 			Ref:            ref,
 			Definition:     pbd,
-			Exporter:       ex.Type,
-			ExporterAttrs:  ex.Attrs,
 			Session:        s.ID(),
 			Frontend:       opt.Frontend,
 			FrontendAttrs:  frontendAttrs,
@@ -268,6 +277,7 @@ func (c *Client) solve(ctx context.Context, def *llb.Definition, runGateway runG
 			Entitlements:   opt.AllowedEntitlements,
 			Internal:       opt.Internal,
 			SourcePolicy:   opt.SourcePolicy,
+			Exporters:      exporters,
 		})
 		if err != nil {
 			return errors.Wrap(err, "failed to solve")

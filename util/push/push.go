@@ -126,7 +126,8 @@ func Push(ctx context.Context, sm *session.Manager, sid string, provider content
 		return err
 	}
 
-	layersDone := progress.OneOff(ctx, "pushing layers")
+	// DEPOT: Adding ref is UX to make it clear that more than one image is being pushed.
+	layersDone := progress.OneOff(ctx, fmt.Sprintf("pushing layers for %s", ref))
 	err = images.Dispatch(ctx, skipNonDistributableBlobs(images.Handlers(handlers...)), nil, ocispecs.Descriptor{
 		Digest:    dgst,
 		Size:      ra.Size(),

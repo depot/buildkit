@@ -183,7 +183,6 @@ func (e *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 	for i, l := range cacheConfig.Layers {
 		func(i int, l v1.CacheLayer) {
 			eg.Go(func() error {
-
 				dgstPair, ok := descs[l.Blob]
 				if !ok {
 					return errors.Errorf("missing blob %s", l.Blob)

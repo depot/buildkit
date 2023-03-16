@@ -27,6 +27,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -177,60 +178,68 @@ func (e *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 		return nil, err
 	}
 
+	// DEPOT: Parallel push cache blobs to S3
+	eg, ctx2 := errgroup.WithContext(ctx)
 	for i, l := range cacheConfig.Layers {
-		dgstPair, ok := descs[l.Blob]
-		if !ok {
-			return nil, errors.Errorf("missing blob %s", l.Blob)
-		}
-		if dgstPair.Descriptor.Annotations == nil {
-			return nil, errors.Errorf("invalid descriptor without annotations")
-		}
-		v, ok := dgstPair.Descriptor.Annotations["containerd.io/uncompressed"]
-		if !ok {
-			return nil, errors.Errorf("invalid descriptor without uncompressed annotation")
-		}
-		diffID, err := digest.Parse(v)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to parse uncompressed annotation")
-		}
+		func(i int, l v1.CacheLayer) {
+			eg.Go(func() error {
 
-		key := e.s3Client.blobKey(dgstPair.Descriptor.Digest)
-		exists, err := e.s3Client.exists(ctx, key)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to check file presence in cache")
-		}
-		if exists != nil {
-			if time.Since(*exists) > e.config.TouchRefresh {
-				err = e.s3Client.touch(ctx, key)
-				if err != nil {
-					return nil, errors.Wrapf(err, "failed to touch file")
+				dgstPair, ok := descs[l.Blob]
+				if !ok {
+					return errors.Errorf("missing blob %s", l.Blob)
 				}
-			}
-		} else {
-			layerDone := progress.OneOff(ctx, fmt.Sprintf("writing layer %s", l.Blob))
-			dt, err := content.ReadBlob(ctx, dgstPair.Provider, dgstPair.Descriptor)
-			if err != nil {
-				return nil, layerDone(err)
-			}
-			if err := e.s3Client.saveMutable(ctx, key, dt); err != nil {
-				return nil, layerDone(errors.Wrap(err, "error writing layer blob"))
-			}
-			layerDone(nil)
-		}
+				if dgstPair.Descriptor.Annotations == nil {
+					return errors.Errorf("invalid descriptor without annotations")
+				}
+				v, ok := dgstPair.Descriptor.Annotations["containerd.io/uncompressed"]
+				if !ok {
+					return errors.Errorf("invalid descriptor without uncompressed annotation")
+				}
+				diffID, err := digest.Parse(v)
+				if err != nil {
+					return errors.Wrapf(err, "failed to parse uncompressed annotation")
+				}
 
-		la := &v1.LayerAnnotations{
-			DiffID:    diffID,
-			Size:      dgstPair.Descriptor.Size,
-			MediaType: dgstPair.Descriptor.MediaType,
-		}
-		if v, ok := dgstPair.Descriptor.Annotations["buildkit/createdat"]; ok {
-			var t time.Time
-			if err := (&t).UnmarshalText([]byte(v)); err != nil {
-				return nil, err
-			}
-			la.CreatedAt = t.UTC()
-		}
-		cacheConfig.Layers[i].Annotations = la
+				key := e.s3Client.blobKey(dgstPair.Descriptor.Digest)
+				exists, err := e.s3Client.exists(ctx2, key)
+				if err != nil {
+					return errors.Wrapf(err, "failed to check file presence in cache")
+				}
+				if exists != nil {
+					if time.Since(*exists) > e.config.TouchRefresh {
+						err = e.s3Client.touch(ctx2, key)
+						if err != nil {
+							return errors.Wrapf(err, "failed to touch file")
+						}
+					}
+				} else {
+					layerDone := progress.OneOff(ctx2, fmt.Sprintf("writing layer %s", l.Blob))
+					dt, err := content.ReadBlob(ctx2, dgstPair.Provider, dgstPair.Descriptor)
+					if err != nil {
+						return layerDone(err)
+					}
+					if err := e.s3Client.saveMutable(ctx2, key, dt); err != nil {
+						return layerDone(errors.Wrap(err, "error writing layer blob"))
+					}
+					layerDone(nil)
+				}
+
+				la := &v1.LayerAnnotations{
+					DiffID:    diffID,
+					Size:      dgstPair.Descriptor.Size,
+					MediaType: dgstPair.Descriptor.MediaType,
+				}
+				if v, ok := dgstPair.Descriptor.Annotations["buildkit/createdat"]; ok {
+					var t time.Time
+					if err := (&t).UnmarshalText([]byte(v)); err != nil {
+						return err
+					}
+					la.CreatedAt = t.UTC()
+				}
+				cacheConfig.Layers[i].Annotations = la
+				return nil
+			})
+		}(i, l)
 	}
 
 	dt, err := json.Marshal(cacheConfig)

@@ -24,6 +24,7 @@ import (
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
+	"github.com/moby/buildkit/solver/result"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/leaseutil"
@@ -33,6 +34,7 @@ import (
 	"github.com/opencontainers/image-spec/identity"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -242,6 +244,16 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		nameCanonical = false
 	}
 
+	// DEPOT: Push struct is just my style to use two loops rather than just
+	// one mega long loop.  Just easier for my brain to read.
+	type Push struct {
+		src        *result.Result[cache.ImmutableRef]
+		sessionID  string
+		targetName string
+		dgst       digest.Digest
+	}
+	toPush := []Push{}
+
 	if e.opts.ImageName != "" {
 		targetNames := strings.Split(e.opts.ImageName, ",")
 		for _, targetName := range targetNames {
@@ -304,13 +316,37 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 					}
 				}
 			}
+
 			if e.push {
-				err := e.pushImage(ctx, src, sessionID, targetName, desc.Digest)
-				if err != nil {
-					return nil, nil, errors.Wrapf(err, "failed to push %v", targetName)
+				push := Push{
+					src:        src,
+					sessionID:  sessionID,
+					targetName: targetName,
+					dgst:       desc.Digest,
 				}
+
+				toPush = append(toPush, push)
 			}
 		}
+
+		// DEPOT: Push images in parallel.
+		eg, ctx2 := errgroup.WithContext(ctx)
+		for _, push := range toPush {
+			func(push Push) {
+				eg.Go(func() error {
+					err := e.pushImage(ctx2, push.src, push.sessionID, push.targetName, push.dgst)
+					if err != nil {
+						return errors.Wrapf(err, "failed to push %v", push.targetName)
+					}
+
+					return nil
+				})
+			}(push)
+		}
+		if err := eg.Wait(); err != nil {
+			return nil, nil, err
+		}
+
 		resp["image.name"] = e.opts.ImageName
 	}
 

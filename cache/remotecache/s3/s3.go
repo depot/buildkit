@@ -242,6 +242,10 @@ func (e *exporter) Finalize(ctx context.Context) (map[string]string, error) {
 		}(i, l)
 	}
 
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
 	dt, err := json.Marshal(cacheConfig)
 	if err != nil {
 		return nil, err

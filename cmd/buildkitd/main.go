@@ -315,6 +315,12 @@ func main() {
 		return err
 	}
 
+	app.Before = func(context *cli.Context) error {
+		//  DEPOT: Start profiler when env var are set.
+		depot.StartProfiler(depot.NewProfilerOptsFromEnv())
+		return nil
+	}
+
 	app.After = func(_ *cli.Context) error {
 		return detect.Shutdown(context.TODO())
 	}

@@ -44,7 +44,7 @@ func StartProfiler(opts *ProfilerOpts) {
 			ApplicationName: "depot-buildkitd",
 			ServerAddress:   opts.Endpoint,
 			Logger:          nil,
-			Tags:            map[string]string{"version": opts.Version, "projectID": opts.ProjectID},
+			Tags:            map[string]string{"version": opts.Version, "projectID": opts.ProjectID, "platform": runtime.GOARCH},
 			AuthToken:       opts.Token,
 
 			ProfileTypes: []pyroscope.ProfileType{

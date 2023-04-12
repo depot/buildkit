@@ -257,33 +257,38 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	if e.opts.ImageName != "" {
 		targetNames := strings.Split(e.opts.ImageName, ",")
 		for _, targetName := range targetNames {
-			if e.opt.Images != nil && e.store {
-				tagDone := progress.OneOff(ctx, "naming to "+targetName)
-				img := images.Image{
-					Target:    *desc,
-					CreatedAt: time.Now(),
-				}
-				sfx := []string{""}
-				if nameCanonical {
-					sfx = append(sfx, "@"+desc.Digest.String())
-				}
-				for _, sfx := range sfx {
-					img.Name = targetName + sfx
-					if _, err := e.opt.Images.Update(ctx, img); err != nil {
-						if !errors.Is(err, errdefs.ErrNotFound) {
-							return nil, nil, tagDone(err)
-						}
+			if e.store {
+				// DEPOT: This is a check for a containerd worker.
+				// We split the logic from a single if statement so that the OCI
+				// worker would also be unlazied.
+				if e.opt.Images != nil {
+					tagDone := progress.OneOff(ctx, "naming to "+targetName)
+					img := images.Image{
+						Target:    *desc,
+						CreatedAt: time.Now(),
+					}
+					sfx := []string{""}
+					if nameCanonical {
+						sfx = append(sfx, "@"+desc.Digest.String())
+					}
+					for _, sfx := range sfx {
+						img.Name = targetName + sfx
+						if _, err := e.opt.Images.Update(ctx, img); err != nil {
+							if !errors.Is(err, errdefs.ErrNotFound) {
+								return nil, nil, tagDone(err)
+							}
 
-						if _, err := e.opt.Images.Create(ctx, img); err != nil {
-							return nil, nil, tagDone(err)
+							if _, err := e.opt.Images.Create(ctx, img); err != nil {
+								return nil, nil, tagDone(err)
+							}
 						}
 					}
-				}
-				tagDone(nil)
+					tagDone(nil)
 
-				if src.Ref != nil && e.unpack {
-					if err := e.unpackImage(ctx, img, src, session.NewGroup(sessionID)); err != nil {
-						return nil, nil, err
+					if src.Ref != nil && e.unpack {
+						if err := e.unpackImage(ctx, img, src, session.NewGroup(sessionID)); err != nil {
+							return nil, nil, err
+						}
 					}
 				}
 

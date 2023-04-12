@@ -247,75 +247,77 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	if e.opts.ImageName != "" {
 		targetNames := strings.Split(e.opts.ImageName, ",")
 		for _, targetName := range targetNames {
-			if e.opt.Images != nil && e.store {
-				tagDone := progress.OneOff(ctx, "naming to "+targetName)
+			if e.store {
+				if e.opt.Images != nil {
+					tagDone := progress.OneOff(ctx, "naming to "+targetName)
 
-				// imageClientCtx is used for propagating the epoch to e.opt.Images.Update() and e.opt.Images.Create().
-				//
-				// Ideally, we should be able to propagate the epoch via images.Image.CreatedAt.
-				// However, due to a bug of containerd, we are temporarily stuck with this workaround.
-				// https://github.com/containerd/containerd/issues/8322
-				imageClientCtx := ctx
-				if e.opts.Epoch != nil {
-					imageClientCtx = epoch.WithSourceDateEpoch(imageClientCtx, e.opts.Epoch)
-				}
-				img := images.Image{
-					Target: *desc,
-					// CreatedAt in images.Images is ignored due to a bug of containerd.
-					// See the comment lines for imageClientCtx.
-				}
-
-				sfx := []string{""}
-				if nameCanonical {
-					sfx = append(sfx, "@"+desc.Digest.String())
-				}
-				for _, sfx := range sfx {
-					img.Name = targetName + sfx
-					if _, err := e.opt.Images.Update(imageClientCtx, img); err != nil {
-						if !errors.Is(err, errdefs.ErrNotFound) {
-							return nil, nil, tagDone(err)
-						}
-
-						if _, err := e.opt.Images.Create(imageClientCtx, img); err != nil {
-							return nil, nil, tagDone(err)
-						}
+					// imageClientCtx is used for propagating the epoch to e.opt.Images.Update() and e.opt.Images.Create().
+					//
+					// Ideally, we should be able to propagate the epoch via images.Image.CreatedAt.
+					// However, due to a bug of containerd, we are temporarily stuck with this workaround.
+					// https://github.com/containerd/containerd/issues/8322
+					imageClientCtx := ctx
+					if e.opts.Epoch != nil {
+						imageClientCtx = epoch.WithSourceDateEpoch(imageClientCtx, e.opts.Epoch)
 					}
-				}
-				tagDone(nil)
+					img := images.Image{
+						Target: *desc,
+						// CreatedAt in images.Images is ignored due to a bug of containerd.
+						// See the comment lines for imageClientCtx.
+					}
 
-				if e.unpack {
-					if err := e.unpackImage(ctx, img, src, session.NewGroup(sessionID)); err != nil {
-						return nil, nil, err
+					sfx := []string{""}
+					if nameCanonical {
+						sfx = append(sfx, "@"+desc.Digest.String())
 					}
-				}
-
-				if !e.storeAllowIncomplete {
-					var refs []cache.ImmutableRef
-					if src.Ref != nil {
-						refs = append(refs, src.Ref)
-					}
-					for _, ref := range src.Refs {
-						refs = append(refs, ref)
-					}
-					eg, ctx := errgroup.WithContext(ctx)
-					for _, ref := range refs {
-						ref := ref
-						eg.Go(func() error {
-							remotes, err := ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
-							if err != nil {
-								return err
+					for _, sfx := range sfx {
+						img.Name = targetName + sfx
+						if _, err := e.opt.Images.Update(imageClientCtx, img); err != nil {
+							if !errors.Is(err, errdefs.ErrNotFound) {
+								return nil, nil, tagDone(err)
 							}
-							remote := remotes[0]
-							if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
-								if err := unlazier.Unlazy(ctx); err != nil {
+
+							if _, err := e.opt.Images.Create(imageClientCtx, img); err != nil {
+								return nil, nil, tagDone(err)
+							}
+						}
+					}
+					tagDone(nil)
+
+					if e.unpack {
+						if err := e.unpackImage(ctx, img, src, session.NewGroup(sessionID)); err != nil {
+							return nil, nil, err
+						}
+					}
+
+					if !e.storeAllowIncomplete {
+						var refs []cache.ImmutableRef
+						if src.Ref != nil {
+							refs = append(refs, src.Ref)
+						}
+						for _, ref := range src.Refs {
+							refs = append(refs, ref)
+						}
+						eg, ctx := errgroup.WithContext(ctx)
+						for _, ref := range refs {
+							ref := ref
+							eg.Go(func() error {
+								remotes, err := ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
+								if err != nil {
 									return err
 								}
-							}
-							return nil
-						})
-					}
-					if err := eg.Wait(); err != nil {
-						return nil, nil, err
+								remote := remotes[0]
+								if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
+									if err := unlazier.Unlazy(ctx); err != nil {
+										return err
+									}
+								}
+								return nil
+							})
+						}
+						if err := eg.Wait(); err != nil {
+							return nil, nil, err
+						}
 					}
 				}
 			}

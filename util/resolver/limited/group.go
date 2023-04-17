@@ -20,7 +20,7 @@ type contextKeyT string
 
 var contextKey = contextKeyT("buildkit/util/resolver/limited")
 
-var Default = New(4)
+var Default = New(12)
 
 type Group struct {
 	mu   sync.Mutex

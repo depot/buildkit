@@ -3,7 +3,6 @@ package dockerfile
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +18,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	// DEPOT: Using parallel gzip for faster image layer compression
+	gzip "github.com/klauspost/pgzip"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"

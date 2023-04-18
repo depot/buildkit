@@ -1,9 +1,11 @@
 package compression
 
 import (
-	"compress/gzip"
 	"context"
 	"io"
+
+	// DEPOT: Using parallel gzip for faster image layer compression
+	gzip "github.com/klauspost/pgzip"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/images"

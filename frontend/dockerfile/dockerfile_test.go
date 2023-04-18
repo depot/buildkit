@@ -3,7 +3,6 @@ package dockerfile
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,6 +20,8 @@ import (
 	"time"
 
 	v1 "github.com/moby/buildkit/cache/remotecache/v1"
+	// DEPOT: Using parallel gzip for faster image layer compression
+	gzip "github.com/klauspost/pgzip"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"

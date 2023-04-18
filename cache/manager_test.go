@@ -3,7 +3,6 @@ package cache
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -17,6 +16,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	// DEPOT: Using parallel gzip for faster image layer compression
+	gzip "github.com/klauspost/pgzip"
 
 	ctdcompression "github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/archive/tarheader"

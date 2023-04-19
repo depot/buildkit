@@ -310,6 +310,10 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 	}
 	idxDone(nil)
 
+	// DEPOT: Add image index so we can use it to pull the image in the depot client.
+	// This image index contains manifests for all platforms.
+	idxDesc.Annotations[exptypes.DepotContainerImageIndex] = string(idxBytes)
+
 	return &idxDesc, nil
 }
 
@@ -444,6 +448,12 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 		return nil, nil, configDone(errors.Wrap(err, "error writing config blob"))
 	}
 	configDone(nil)
+
+	// DEPOT: Add manifest so it can be sent back to the depot client.
+	// We need this as the manifest does not appear to always
+	// be available in the content store.
+	annotations.ManifestDescriptor[exptypes.DepotContainerImageManifest] = string(mfstJSON)
+	annotations.ManifestDescriptor[exptypes.DepotContainerImageConfig] = string(config)
 
 	return &ocispecs.Descriptor{
 		Annotations: annotations.ManifestDescriptor,

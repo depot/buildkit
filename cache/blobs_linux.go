@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"hash"
-	"io"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
@@ -55,14 +54,14 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 	bufW := bufio.NewWriterSize(cw, 128*1024)
 	var labels map[string]string
 	if compressorFunc != nil {
-		dgstr := NewFastDigester()
+		//dgstr := NewFastDigester()
 		compressed, err := compressorFunc(bufW, mediaType)
 		if err != nil {
 			return emptyDesc, false, errors.Wrap(err, "failed to get compressed stream")
 		}
 		// Close ensure compressorFunc does some finalization works.
 		defer compressed.Close()
-		if err := overlay.WriteUpperdir(ctx, io.MultiWriter(compressed, dgstr.Hash()), upperdir, lower); err != nil {
+		if err := overlay.WriteUpperdir(ctx, compressed, upperdir, lower); err != nil {
 			return emptyDesc, false, errors.Wrap(err, "failed to write compressed diff")
 		}
 		if err := compressed.Close(); err != nil {
@@ -71,7 +70,6 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		labels[containerdUncompressed] = dgstr.Digest().String()
 	} else {
 		if err = overlay.WriteUpperdir(ctx, bufW, upperdir, lower); err != nil {
 			return emptyDesc, false, errors.Wrap(err, "failed to write diff")
@@ -86,7 +84,9 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 		commitopts = append(commitopts, content.WithLabels(labels))
 	}
 	dgst := cw.Digest()
+	labels[containerdUncompressed] = dgst.String()
 	if err := cw.Commit(ctx, 0, dgst, commitopts...); err != nil {
+
 		if !errdefs.IsAlreadyExists(err) {
 			return emptyDesc, false, errors.Wrap(err, "failed to commit")
 		}

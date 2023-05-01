@@ -27,6 +27,7 @@ import (
 	"github.com/moby/buildkit/solver/result"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
+	"github.com/moby/buildkit/util/imageutil"
 	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/push"
@@ -212,13 +213,23 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	}
 	opts.Annotations = opts.Annotations.Merge(as)
 
-	ctx, done, err := leaseutil.WithLease(ctx, e.opt.LeaseManager, leaseutil.MakeTemporary)
+	// DEPOT: Extra lease time for layers before GCed.
+	// We occasionally had load fail as the blob layers would be garbage collected.
+	// The image needs to be exported, pushed and loaded before 30 minutes.
+	const DepotLeaseDuration time.Duration = 30 * time.Minute
+	ctx, done, err := leaseutil.WithLease(
+		ctx,
+		e.opt.LeaseManager,
+		leases.WithExpiration(DepotLeaseDuration),
+		leaseutil.MakeTemporary,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() {
 		if descref == nil {
-			done(context.TODO())
+			// DEPOT: Lease is not deleted until expiration time is reached.
+			imageutil.AddLease(done)
 		}
 	}()
 

@@ -6695,7 +6695,8 @@ FROM scratch
 COPY --from=0 / /
 `)
 
-	const expectedDigest = "sha256:febcf750a388bdbe9461d6b19a8c7cc098ccd7b787bb6473cce5e87977376c8b"
+	// DEPOT: updated digest to account for parallel gzip
+	const expectedDigest = "sha256:acdf86c3b7709d6890a2bd2e65ab289e099d797d6c874915362e9218531e5d49"
 
 	dir, err := integration.Tmpdir(
 		t,

@@ -182,10 +182,11 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 	sm.Register(os)
 
 	iw, err := imageexporter.NewImageWriter(imageexporter.WriterOpt{
-		Snapshotter:  opt.Snapshotter,
-		ContentStore: opt.ContentStore,
-		Applier:      opt.Applier,
-		Differ:       opt.Differ,
+		Snapshotter:   opt.Snapshotter,
+		ContentStore:  opt.ContentStore,
+		Applier:       opt.Applier,
+		Differ:        opt.Differ,
+		LeasesManager: opt.LeaseManager,
 	})
 	if err != nil {
 		return nil, err

@@ -12,6 +12,7 @@ import (
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/diff"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/platforms"
 	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	"github.com/moby/buildkit/cache"
@@ -42,10 +43,11 @@ import (
 )
 
 type WriterOpt struct {
-	Snapshotter  snapshot.Snapshotter
-	ContentStore content.Store
-	Applier      diff.Applier
-	Differ       diff.Comparer
+	Snapshotter   snapshot.Snapshotter
+	ContentStore  content.Store
+	Applier       diff.Applier
+	Differ        diff.Comparer
+	LeasesManager leases.Manager
 }
 
 func NewImageWriter(opt WriterOpt) (*ImageWriter, error) {
@@ -384,6 +386,20 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 		desc.Annotations = RemoveInternalLayerAnnotations(desc.Annotations, opts.OCITypes)
 		mfst.Layers = append(mfst.Layers, desc)
 		labels[fmt.Sprintf("containerd.io/gc.ref.content.%d", i+1)] = desc.Digest.String()
+	}
+
+	// DEPOT: Attach all layers to the depot export lease so we can use them to pull the image in the depot client.
+	leaseID, ok := ctx.Value(DepotLeaseKey{}).(string)
+	if ok && leaseID != "" {
+		for _, layer := range mfst.Layers {
+			ic.opt.LeasesManager.AddResource(ctx, leases.Lease{
+				ID: leaseID,
+			},
+				leases.Resource{
+					ID:   layer.Digest.String(),
+					Type: "content",
+				})
+		}
 	}
 
 	mfstJSON, err := json.MarshalIndent(mfst, "", "  ")

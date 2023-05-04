@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
@@ -19,11 +20,13 @@ import (
 	"github.com/containerd/containerd/rootfs"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver/result"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/leaseutil"
@@ -37,6 +40,8 @@ import (
 )
 
 const (
+	DepotExportLease = "depot.export.lease"
+
 	// keyUnsafeInternalStoreAllowIncomplete should only be used for tests. This option allows exporting image to the image store
 	// as well as lacking some blobs in the content store. Some integration tests for lazyref behaviour depends on this option.
 	// Ignored when store=false.
@@ -155,6 +160,8 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 				return nil, errors.Wrapf(err, "non-bool value specified for %s", k)
 			}
 			i.nameCanonical = b
+		case DepotExportLease:
+			i.UseExportLease = true
 		default:
 			if i.meta == nil {
 				i.meta = make(map[string][]byte)
@@ -177,6 +184,7 @@ type imageExporterInstance struct {
 	nameCanonical        bool
 	danglingPrefix       string
 	meta                 map[string][]byte
+	UseExportLease       bool
 }
 
 func (e *imageExporterInstance) Name() string {
@@ -186,6 +194,9 @@ func (e *imageExporterInstance) Name() string {
 func (e *imageExporterInstance) Config() *exporter.Config {
 	return exporter.NewConfigWithCompression(e.opts.RefCfg.Compression)
 }
+
+// DEPOT: We have a special lease attached to context to inhibit the GC of layers.
+type DepotLeaseKey struct{}
 
 func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, sessionID string) (_ map[string]string, descref exporter.DescriptorReference, err error) {
 	if src.Metadata == nil {
@@ -201,6 +212,27 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		return nil, nil, err
 	}
 	opts.Annotations = opts.Annotations.Merge(as)
+
+	resp := make(map[string]string)
+
+	// DEPOT: Create the lease that should live long enough for the image load to complete.
+	if e.UseExportLease {
+		lease, err := e.opt.LeaseManager.Create(
+			ctx,
+			leases.WithRandomID(),
+			leases.WithExpiration(time.Hour),
+			leases.WithLabels(map[string]string{
+				depot.ExportLeaseLabel: sessionID,
+			}),
+		)
+		if err != nil {
+			bklog.G(ctx).Warnf("Unable to create lease for image export %v", err)
+		} else {
+			ctx = context.WithValue(ctx, DepotLeaseKey{}, lease.ID)
+			// DEPOT: The CLI uses this to delete the lease once the image is loaded.
+			resp[depot.ExportLeaseLabel] = lease.ID
+		}
+	}
 
 	ctx, done, err := leaseutil.WithLease(ctx, e.opt.LeaseManager, leaseutil.MakeTemporary)
 	if err != nil {
@@ -221,8 +253,6 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			descref = NewDescriptorReference(*desc, done)
 		}
 	}()
-
-	resp := make(map[string]string)
 
 	if n, ok := src.Metadata["image.name"]; e.opts.ImageName == "*" && ok {
 		e.opts.ImageName = string(n)

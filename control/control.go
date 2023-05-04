@@ -9,7 +9,9 @@ import (
 	"time"
 
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
+	leasesapi "github.com/containerd/containerd/api/services/leases/v1"
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/services/content/contentserver"
 	"github.com/docker/distribution/reference"
 	"github.com/mitchellh/hashstructure/v2"
@@ -49,6 +51,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type Opt struct {
@@ -133,6 +136,21 @@ func (c *Controller) Register(server *grpc.Server) {
 
 	store := &roContentStore{c.opt.ContentStore.WithFallbackNS(c.opt.ContentStore.Namespace() + "_history")}
 	contentapi.RegisterContentServer(server, contentserver.New(store))
+	leasesapi.RegisterLeasesServer(server, &LeaseManager{leasesapi.UnimplementedLeasesServer{}, c.opt.LeaseManager})
+}
+
+// DEPOT: This lease manager is used by the CLI to remove image leases after load.
+type LeaseManager struct {
+	leasesapi.UnimplementedLeasesServer
+	manager leases.Manager
+}
+
+func (m *LeaseManager) Delete(ctx context.Context, req *leasesapi.DeleteRequest) (*emptypb.Empty, error) {
+	err := m.manager.Delete(ctx, leases.Lease{ID: req.ID})
+	if err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (c *Controller) DiskUsage(ctx context.Context, r *controlapi.DiskUsageRequest) (*controlapi.DiskUsageResponse, error) {

@@ -53,28 +53,26 @@ type PulledManifests struct {
 	Provider         func(session.Group) content.Provider
 }
 
-func (p *Puller) resolve(ctx context.Context, resolver remotes.Resolver) error {
-	_, err := p.g.Do(ctx, "", func(ctx context.Context) (_ interface{}, err error) {
-		if p.resolveErr != nil || p.resolveDone {
-			return nil, p.resolveErr
+func (p *Puller) resolve(ctx context.Context, resolver remotes.Resolver) (err error) {
+	// TODO(goller):
+	if p.resolveErr != nil || p.resolveDone {
+		return p.resolveErr
+	}
+	defer func() {
+		if !errors.Is(err, context.Canceled) {
+			p.resolveErr = err
 		}
-		defer func() {
-			if !errors.Is(err, context.Canceled) {
-				p.resolveErr = err
-			}
-		}()
-		if p.tryLocalResolve(ctx) == nil {
-			return
-		}
-		ref, desc, err := resolver.Resolve(ctx, p.Src.String())
-		if err != nil {
-			return nil, err
-		}
-		p.desc = desc
-		p.ref = ref
-		p.resolveDone = true
-		return nil, nil
-	})
+	}()
+	if p.tryLocalResolve(ctx) == nil {
+		return
+	}
+	ref, desc, err := resolver.Resolve(ctx, p.Src.String())
+	if err != nil {
+		return err
+	}
+	p.desc = desc
+	p.ref = ref
+	p.resolveDone = true
 	return err
 }
 

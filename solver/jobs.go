@@ -867,8 +867,8 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 	if err != nil {
 		return nil, nil, err
 	}
-	flightControlKey := "exec"
-	res, err := s.g.Do(ctx, flightControlKey, func(ctx context.Context) (ret interface{}, retErr error) {
+	// TODO(goller):
+	res, err := func(ctx context.Context) (ret interface{}, retErr error) {
 		if s.execDone {
 			if s.execErr != nil {
 				return nil, s.execErr
@@ -926,7 +926,7 @@ func (s *sharedOp) Exec(ctx context.Context, inputs []Result) (outputs []Result,
 			return nil, err
 		}
 		return s.execRes, nil
-	})
+	}(ctx)
 	if res == nil || err != nil {
 		return nil, nil, err
 	}

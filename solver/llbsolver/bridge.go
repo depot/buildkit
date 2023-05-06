@@ -241,7 +241,8 @@ func (rp *resultProxy) Result(ctx context.Context) (res solver.CachedResult, err
 	defer func() {
 		err = rp.wrapError(err)
 	}()
-	r, err := rp.g.Do(ctx, "result", func(ctx context.Context) (interface{}, error) {
+	// TODO(goller):
+	r, err := func(ctx context.Context) (interface{}, error) {
 		rp.mu.Lock()
 		if rp.released {
 			rp.mu.Unlock()
@@ -283,7 +284,7 @@ func (rp *resultProxy) Result(ctx context.Context) (res solver.CachedResult, err
 		}
 		rp.mu.Unlock()
 		return v, err
-	})
+	}(ctx)
 	if r != nil {
 		return r.(solver.CachedResult), nil
 	}

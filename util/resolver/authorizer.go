@@ -296,7 +296,8 @@ func (ah *authHandler) doBearerAuth(ctx context.Context, sm *session.Manager, g 
 	// Docs: https://docs.docker.com/registry/spec/auth/scope
 	scoped := strings.Join(to.Scopes, " ")
 
-	res, err := ah.g.Do(ctx, scoped, func(ctx context.Context) (interface{}, error) {
+	// TODO(goller):
+	res, err := func(ctx context.Context) (interface{}, error) {
 		ah.scopedTokensMu.Lock()
 		r, exist := ah.scopedTokens[scoped]
 		ah.scopedTokensMu.Unlock()
@@ -313,7 +314,7 @@ func (ah *authHandler) doBearerAuth(ctx context.Context, sm *session.Manager, g 
 		ah.scopedTokens[scoped] = r
 		ah.scopedTokensMu.Unlock()
 		return r, nil
-	})
+	}(ctx)
 
 	if err != nil || res == nil {
 		return "", err

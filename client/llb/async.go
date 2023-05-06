@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/moby/buildkit/solver/pb"
-	"github.com/moby/buildkit/util/flightcontrol"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 )
@@ -15,7 +14,6 @@ type asyncState struct {
 	target State
 	set    bool
 	err    error
-	g      flightcontrol.Group
 }
 
 func (as *asyncState) Output() Output {
@@ -53,7 +51,7 @@ func (as *asyncState) ToInput(ctx context.Context, c *Constraints) (*pb.Input, e
 }
 
 func (as *asyncState) Do(ctx context.Context, c *Constraints) error {
-	_, err := as.g.Do(ctx, "", func(ctx context.Context) (interface{}, error) {
+	_, err := func(ctx context.Context) (interface{}, error) { // TODO(goller):
 		if as.set {
 			return as.target, as.err
 		}
@@ -71,7 +69,7 @@ func (as *asyncState) Do(ctx context.Context, c *Constraints) error {
 		as.err = err
 		as.set = true
 		return res, err
-	})
+	}(ctx)
 	if err != nil {
 		return err
 	}

@@ -255,6 +255,7 @@ func (p *puller) CacheKey(ctx context.Context, g session.Group, index int) (cach
 	// be canceled before the progress output is complete
 	progressFactory := progress.FromContext(ctx)
 
+	// TODO(goller):
 	_, err = p.g.Do(ctx, "", func(ctx context.Context) (_ interface{}, err error) {
 		if p.cacheKeyErr != nil || p.cacheKeyDone {
 			return nil, p.cacheKeyErr

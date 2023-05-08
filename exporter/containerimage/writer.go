@@ -59,16 +59,16 @@ type ImageWriter struct {
 	opt WriterOpt
 }
 
-func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, sessionID string, opts *ImageCommitOpts) (*ocispecs.Descriptor, error) {
+func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, sessionID string, opts *ImageCommitOpts) (*ocispecs.Descriptor, []*ocispecs.Manifest, error) {
 	if _, ok := inp.Metadata[exptypes.ExporterPlatformsKey]; len(inp.Refs) > 0 && !ok {
-		return nil, errors.Errorf("unable to export multiple refs, missing platforms mapping")
+		return nil, nil, errors.Errorf("unable to export multiple refs, missing platforms mapping")
 	}
 
 	isMap := len(inp.Refs) > 0
 
 	ps, err := exptypes.ParsePlatforms(inp.Metadata)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if !isMap {
@@ -91,7 +91,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 	}
 	if opts.Epoch == nil {
 		if tm, ok, err := epoch.ParseSource(inp); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if ok {
 			opts.Epoch = tm
 		}
@@ -100,7 +100,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 	for pk, a := range opts.Annotations {
 		if pk != "" {
 			if _, ok := inp.FindRef(pk); !ok {
-				return nil, errors.Errorf("invalid annotation: no platform %s found in source", pk)
+				return nil, nil, errors.Errorf("invalid annotation: no platform %s found in source", pk)
 			}
 		}
 		if len(a.Index)+len(a.IndexDescriptor)+len(a.ManifestDescriptor) > 0 {
@@ -110,7 +110,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 
 	if !isMap {
 		if len(ps.Platforms) > 1 {
-			return nil, errors.Errorf("cannot export multiple platforms without multi-platform enabled")
+			return nil, nil, errors.Errorf("cannot export multiple platforms without multi-platform enabled")
 		}
 
 		var ref cache.ImmutableRef
@@ -126,7 +126,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 
 		remotes, err := ic.exportLayers(ctx, opts.RefCfg, session.NewGroup(sessionID), ref)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		var dtbi []byte
@@ -134,20 +134,20 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			if dtbi, err = buildinfo.Format(exptypes.ParseKey(inp.Metadata, exptypes.ExporterBuildInfo, p), buildinfo.FormatOpts{
 				RemoveAttrs: !opts.BuildInfoAttrs,
 			}); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
 		annotations := opts.Annotations.Platform(nil)
 		if len(annotations.Index) > 0 || len(annotations.IndexDescriptor) > 0 {
-			return nil, errors.Errorf("index annotations not supported for single platform export")
+			return nil, nil, errors.Errorf("index annotations not supported for single platform export")
 		}
 
 		config := exptypes.ParseKey(inp.Metadata, exptypes.ExporterImageConfigKey, p)
 		inlineCache := exptypes.ParseKey(inp.Metadata, exptypes.ExporterInlineCache, p)
-		mfstDesc, configDesc, err := ic.commitDistributionManifest(ctx, opts, ref, config, &remotes[0], annotations, inlineCache, dtbi, opts.Epoch, session.NewGroup(sessionID))
+		manifest, mfstDesc, err := ic.commitDistributionManifest(ctx, opts, ref, config, &remotes[0], annotations, inlineCache, dtbi, opts.Epoch, session.NewGroup(sessionID))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if mfstDesc.Annotations == nil {
 			mfstDesc.Annotations = make(map[string]string)
@@ -155,9 +155,9 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 		if len(ps.Platforms) == 1 {
 			mfstDesc.Platform = &ps.Platforms[0].Platform
 		}
-		mfstDesc.Annotations[exptypes.ExporterConfigDigestKey] = configDesc.Digest.String()
+		mfstDesc.Annotations[exptypes.ExporterConfigDigestKey] = manifest.Config.Digest.String()
 
-		return mfstDesc, nil
+		return mfstDesc, []*ocispecs.Manifest{manifest}, nil
 	}
 
 	if len(inp.Attestations) > 0 {
@@ -169,7 +169,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 	for _, p := range ps.Platforms {
 		r, ok := inp.FindRef(p.ID)
 		if !ok {
-			return nil, errors.Errorf("failed to find ref for ID %s", p.ID)
+			return nil, nil, errors.Errorf("failed to find ref for ID %s", p.ID)
 		}
 		remotesMap[p.ID] = len(refs)
 		refs = append(refs, r)
@@ -177,7 +177,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 
 	remotes, err := ic.exportLayers(ctx, opts.RefCfg, session.NewGroup(sessionID), refs...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	idx := struct {
@@ -202,12 +202,14 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 
 	labels := map[string]string{}
 
-	var attestationManifests []ocispecs.Descriptor
-
+	var (
+		attestationManifests []ocispecs.Descriptor
+		manifests            []*ocispecs.Manifest
+	)
 	for i, p := range ps.Platforms {
 		r, ok := inp.FindRef(p.ID)
 		if !ok {
-			return nil, errors.Errorf("failed to find ref for ID %s", p.ID)
+			return nil, nil, errors.Errorf("failed to find ref for ID %s", p.ID)
 		}
 		config := exptypes.ParseKey(inp.Metadata, exptypes.ExporterImageConfigKey, p)
 		inlineCache := exptypes.ParseKey(inp.Metadata, exptypes.ExporterInlineCache, p)
@@ -217,7 +219,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			if dtbi, err = buildinfo.Format(exptypes.ParseKey(inp.Metadata, exptypes.ExporterBuildInfo, p), buildinfo.FormatOpts{
 				RemoveAttrs: !opts.BuildInfoAttrs,
 			}); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -228,20 +230,21 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			}
 		}
 
-		desc, _, err := ic.commitDistributionManifest(ctx, opts, r, config, remote, opts.Annotations.Platform(&p.Platform), inlineCache, dtbi, opts.Epoch, session.NewGroup(sessionID))
+		manifest, desc, err := ic.commitDistributionManifest(ctx, opts, r, config, remote, opts.Annotations.Platform(&p.Platform), inlineCache, dtbi, opts.Epoch, session.NewGroup(sessionID))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		dp := p.Platform
 		desc.Platform = &dp
 		idx.Manifests = append(idx.Manifests, *desc)
+		manifests = append(manifests, manifest)
 
 		labels[fmt.Sprintf("containerd.io/gc.ref.content.%d", i)] = desc.Digest.String()
 
 		if attestations, ok := inp.Attestations[p.ID]; ok {
 			attestations, err := attestation.Unbundle(ctx, session.NewGroup(sessionID), attestations)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			eg, ctx2 := errgroup.WithContext(ctx)
@@ -257,7 +260,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 				})
 			}
 			if err := eg.Wait(); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			var defaultSubjects []intoto.Subject
@@ -267,7 +270,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 				}
 				pl, err := purl.RefToPURL(name, &p.Platform)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				defaultSubjects = append(defaultSubjects, intoto.Subject{
 					Name:   pl,
@@ -276,12 +279,12 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			}
 			stmts, err := attestation.MakeInTotoStatements(ctx, session.NewGroup(sessionID), attestations, defaultSubjects)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			desc, err := ic.commitAttestationsManifest(ctx, opts, p, desc.Digest.String(), stmts)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			desc.Platform = &intotoPlatform
 			attestationManifests = append(attestationManifests, *desc)
@@ -295,7 +298,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 
 	idxBytes, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal index")
+		return nil, nil, errors.Wrap(err, "failed to marshal index")
 	}
 
 	idxDigest := digest.FromBytes(idxBytes)
@@ -308,7 +311,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 	idxDone := progress.OneOff(ctx, "exporting manifest list "+idxDigest.String())
 
 	if err := content.WriteBlob(ctx, ic.opt.ContentStore, idxDigest.String(), bytes.NewReader(idxBytes), idxDesc, content.WithLabels(labels)); err != nil {
-		return nil, idxDone(errors.Wrapf(err, "error writing manifest list blob %s", idxDigest))
+		return nil, nil, idxDone(errors.Wrapf(err, "error writing manifest list blob %s", idxDigest))
 	}
 	idxDone(nil)
 
@@ -316,7 +319,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 	// This image index contains manifests for all platforms.
 	idxDesc.Annotations[exptypes.DepotContainerImageIndex] = string(idxBytes)
 
-	return &idxDesc, nil
+	return &idxDesc, manifests, nil
 }
 
 func (ic *ImageWriter) exportLayers(ctx context.Context, refCfg cacheconfig.RefConfig, s session.Group, refs ...cache.ImmutableRef) ([]solver.Remote, error) {
@@ -356,7 +359,7 @@ func (ic *ImageWriter) exportLayers(ctx context.Context, refCfg cacheconfig.RefC
 	return out, err
 }
 
-func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *ImageCommitOpts, ref cache.ImmutableRef, config []byte, remote *solver.Remote, annotations *Annotations, inlineCache []byte, buildInfo []byte, epoch *time.Time, sg session.Group) (*ocispecs.Descriptor, *ocispecs.Descriptor, error) {
+func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *ImageCommitOpts, ref cache.ImmutableRef, config []byte, remote *solver.Remote, annotations *Annotations, inlineCache []byte, buildInfo []byte, epoch *time.Time, sg session.Group) (*ocispecs.Manifest, *ocispecs.Descriptor, error) {
 	if len(config) == 0 {
 		var err error
 		config, err = defaultImageConfig()
@@ -453,14 +456,9 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 	}
 	mfstDone(nil)
 
-	configDesc := ocispecs.Descriptor{
-		Digest:    configDigest,
-		Size:      int64(len(config)),
-		MediaType: configType,
-	}
 	configDone := progress.OneOff(ctx, "exporting config "+configDigest.String())
 
-	if err := content.WriteBlob(ctx, ic.opt.ContentStore, configDigest.String(), bytes.NewReader(config), configDesc); err != nil {
+	if err := content.WriteBlob(ctx, ic.opt.ContentStore, configDigest.String(), bytes.NewReader(config), mfst.Config); err != nil {
 		return nil, nil, configDone(errors.Wrap(err, "error writing config blob"))
 	}
 	configDone(nil)
@@ -471,12 +469,12 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 	annotations.ManifestDescriptor[exptypes.DepotContainerImageManifest] = string(mfstJSON)
 	annotations.ManifestDescriptor[exptypes.DepotContainerImageConfig] = string(config)
 
-	return &ocispecs.Descriptor{
+	return &mfst.Manifest, &ocispecs.Descriptor{
 		Annotations: annotations.ManifestDescriptor,
 		Digest:      mfstDigest,
 		Size:        int64(len(mfstJSON)),
 		MediaType:   manifestType,
-	}, &configDesc, nil
+	}, nil
 }
 
 func (ic *ImageWriter) commitAttestationsManifest(ctx context.Context, opts *ImageCommitOpts, p exptypes.Platform, target string, statements []intoto.Statement) (*ocispecs.Descriptor, error) {

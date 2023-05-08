@@ -252,7 +252,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 	}()
 
-	desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
+	desc, manifests, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -394,6 +394,12 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		return nil, nil, err
 	}
 	resp[exptypes.ExporterImageDescriptorKey] = base64.StdEncoding.EncodeToString(dtdesc)
+
+	encodedManifests, err := depot.MarshalManifests(manifests)
+	if err != nil {
+		return nil, nil, err
+	}
+	resp[depot.ExportManifests] = encodedManifests
 
 	return resp, nil, nil
 }

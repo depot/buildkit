@@ -3,6 +3,7 @@ package solver
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -384,6 +385,9 @@ func (jl *Solver) loadUnlocked(v, parent Vertex, j *Job, cache map[Vertex]Vertex
 			solver:       jl,
 			origDigest:   origVtx.Digest(),
 		}
+		if debugScheduler {
+			log.Printf("loadUnlocked %s %v %v", dgst, jl.actives, st)
+		}
 		jl.actives[dgst] = st
 	}
 
@@ -499,6 +503,10 @@ func (jl *Solver) Get(id string) (*Job, error) {
 // called with solver lock
 func (jl *Solver) deleteIfUnreferenced(k digest.Digest, st *state) {
 	if len(st.jobs) == 0 && len(st.parents) == 0 {
+		if debugScheduler {
+			log.Printf("deleteIfUnreferenced %s %v %v", k, jl.actives, st)
+		}
+
 		for chKey := range st.childVtx {
 			chState := jl.actives[chKey]
 			delete(chState.parents, k)
@@ -507,6 +515,7 @@ func (jl *Solver) deleteIfUnreferenced(k digest.Digest, st *state) {
 		st.Release()
 		delete(jl.actives, k)
 	}
+
 }
 
 func (j *Job) Build(ctx context.Context, e Edge) (CachedResultWithProvenance, error) {

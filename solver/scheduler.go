@@ -374,14 +374,20 @@ func debugSchedulerPreUnpark(e *edge, inc []pipe.Sender, updates, allPipes []pip
 	for i, dep := range e.deps {
 		des := edgeStatusInitial
 		if dep.req != nil {
-			des = dep.req.Request().(*edgeRequest).desiredState
+			if edgeReq, ok := dep.req.Request().(*edgeRequest); ok {
+				des = edgeReq.desiredState
+			}
 		}
 		log.Debugf(":: dep%d %s state=%s des=%s keys=%d hasslowcache=%v preprocessfunc=%v", i, e.edge.Vertex.Inputs()[i].Vertex.Name(), dep.state, des, len(dep.keys), e.slowCacheFunc(dep) != nil, e.preprocessFunc(dep) != nil)
 	}
 
 	for i, in := range inc {
 		req := in.Request()
-		log.Debugf("> incoming-%d: %p dstate=%s canceled=%v", i, in, req.Payload.(*edgeRequest).desiredState, req.Canceled)
+		des := edgeStatusInitial
+		if edgeReq, ok := req.Payload.(*edgeRequest); ok {
+			des = edgeReq.desiredState
+		}
+		log.Debugf("> incoming-%d: %p dstate=%s canceled=%v", i, in, des, req.Canceled)
 	}
 
 	for i, up := range updates {

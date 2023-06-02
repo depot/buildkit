@@ -348,7 +348,7 @@ func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipe.Receiver 
 	target := pf.s.ef.getEdge(ee)
 	if target == nil {
 		return pf.NewFuncRequest(func(_ context.Context) (interface{}, error) {
-			return nil, errors.Errorf("failed to get edge: inconsistent graph state")
+			return nil, errors.Errorf("failed to get edge: inconsistent graph state: %s %s", ee.Vertex.Name(), ee.Vertex.Digest())
 		})
 	}
 	p := pf.s.newPipe(target, pf.e, pipe.Request{Payload: req})

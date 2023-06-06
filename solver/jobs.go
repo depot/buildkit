@@ -526,8 +526,6 @@ func (j *Job) Build(ctx context.Context, e Edge) (CachedResultWithProvenance, er
 		return nil, err
 	}
 
-	j.list.mu.Lock()
-	defer j.list.mu.Unlock()
 	return &withProvenance{CachedResult: res, j: j, e: e}, nil
 }
 
@@ -542,6 +540,10 @@ func (wp *withProvenance) WalkProvenance(ctx context.Context, f func(ProvenanceP
 		return nil
 	}
 	m := map[digest.Digest]struct{}{}
+
+	wp.j.list.mu.Lock()
+	defer wp.j.list.mu.Unlock()
+
 	return wp.j.walkProvenance(ctx, wp.e, f, m)
 }
 
@@ -552,10 +554,12 @@ func (j *Job) walkProvenance(ctx context.Context, e Edge, f func(ProvenanceProvi
 	visited[e.Vertex.Digest()] = struct{}{}
 	if st, ok := j.list.actives[e.Vertex.Digest()]; ok {
 		st.mu.Lock()
-		if wp, ok := st.op.op.(ProvenanceProvider); ok {
-			if err := f(wp); err != nil {
-				st.mu.Unlock()
-				return err
+		if st.op != nil {
+			if wp, ok := st.op.op.(ProvenanceProvider); ok {
+				if err := f(wp); err != nil {
+					st.mu.Unlock()
+					return err
+				}
 			}
 		}
 		st.mu.Unlock()

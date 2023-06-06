@@ -52,6 +52,7 @@ type Opt struct {
 	OOMScoreAdj     *int
 	ApparmorProfile string
 	SELinux         bool
+	GPU             bool
 	TracingSocket   string
 	ResourceMonitor *resources.Monitor
 }
@@ -73,6 +74,7 @@ type runcExecutor struct {
 	mu               sync.Mutex
 	apparmorProfile  string
 	selinux          bool
+	gpu              bool
 	tracingSocket    string
 	resmon           *resources.Monitor
 }
@@ -139,6 +141,7 @@ func New(opt Opt, networkProviders map[pb.NetMode]network.Provider) (executor.Ex
 		running:          make(map[string]chan error),
 		apparmorProfile:  opt.ApparmorProfile,
 		selinux:          opt.SELinux,
+		gpu:              opt.GPU,
 		tracingSocket:    opt.TracingSocket,
 		resmon:           opt.ResourceMonitor,
 	}
@@ -265,7 +268,7 @@ func (w *runcExecutor) Run(ctx context.Context, id string, root executor.Mount, 
 		}
 	}
 
-	spec, cleanup, err := oci.GenerateSpec(ctx, meta, mounts, id, resolvConf, hostsFile, namespace, w.cgroupParent, w.processMode, w.idmap, w.apparmorProfile, w.selinux, w.tracingSocket, opts...)
+	spec, cleanup, err := oci.GenerateSpec(ctx, meta, mounts, id, resolvConf, hostsFile, namespace, w.cgroupParent, w.processMode, w.idmap, w.apparmorProfile, w.selinux, w.gpu, w.tracingSocket, opts...)
 	if err != nil {
 		return nil, err
 	}

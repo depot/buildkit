@@ -166,9 +166,13 @@ func (s *scheduler) dispatch(e *edge) {
 	// if keys changed there might be possiblity for merge with other edge
 	if e.keysDidChange {
 		if k := e.currentIndexKey(); k != nil {
+			// DEPOT: Skip merge to on assumption that it is causing inconsistent graph state.
+			// We have the logic inverted here so that we can continue to use the integration tests.
+			useMergeTo := os.Getenv("DEPOT_DISABLE_MERGE_TO") == ""
+
 			// skip this if not at least 1 key per dep
 			origEdge := e.index.LoadOrStore(k, e)
-			if origEdge != nil {
+			if origEdge != nil && useMergeTo {
 				if e.isDep(origEdge) || origEdge.isDep(e) {
 					bklog.G(context.TODO()).Debugf("skip merge due to dependency")
 				} else {

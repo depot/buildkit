@@ -89,6 +89,9 @@ type OCIConfig struct {
 
 	// MaxParallelism is the maximum number of parallel build steps that can be run at the same time.
 	MaxParallelism int `toml:"max-parallelism"`
+
+	// Enables GPU support using nvidia-container-toolkit.
+	GPU bool `toml:"gpu"`
 }
 
 type ContainerdConfig struct {

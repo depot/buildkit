@@ -177,7 +177,9 @@ func (w *containerdExecutor) Run(ctx context.Context, id string, root executor.M
 	}
 
 	processMode := oci.ProcessSandbox // FIXME(AkihiroSuda)
-	spec, cleanup, err := oci.GenerateSpec(ctx, meta, mounts, id, resolvConf, hostsFile, namespace, w.cgroupParent, processMode, nil, w.apparmorProfile, w.selinux, w.traceSocket, opts...)
+	// DEPOT: do not support GPU for containerd for now.
+	const gpuSupport = false
+	spec, cleanup, err := oci.GenerateSpec(ctx, meta, mounts, id, resolvConf, hostsFile, namespace, w.cgroupParent, processMode, nil, w.apparmorProfile, w.selinux, gpuSupport, w.traceSocket, opts...)
 	if err != nil {
 		return err
 	}

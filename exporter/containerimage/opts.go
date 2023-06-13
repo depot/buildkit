@@ -13,6 +13,12 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// DepotExportImageVersion returns the manifest and config for the image via response.
+	// Previously, we returned it via annotations, but that was not compatible with GCR.
+	DepotExportImageVersion = "depot.export.image.version"
+)
+
 type ImageCommitOpts struct {
 	ImageName   string
 	RefCfg      cacheconfig.RefConfig
@@ -21,7 +27,23 @@ type ImageCommitOpts struct {
 	Epoch       *time.Time
 
 	ForceInlineAttestations bool // force inline attestations to be attached
+
+	// DEPOT: ExportImageVersion determines the response format to the CLI.
+	// Previously (aka v1) we returned the manifest and config via annotations.
+	// In V2 we return the manifest and config via response.
+	ExportImageVersion ExportImageVersion
 }
+
+type ExportImageVersion int
+
+const (
+	ExportImageVersionUnknown ExportImageVersion = iota
+	// ExportImageVersionV1 is the default version for backwards compatibility.
+	// It uses annotations to return the manifest and config.
+	ExportImageVersionV1
+	// ExportImageVersionV2 returns the manifest and config via response.
+	ExportImageVersionV2
+)
 
 func (c *ImageCommitOpts) Load(ctx context.Context, opt map[string]string) (map[string]string, error) {
 	rest := make(map[string]string)
@@ -41,6 +63,10 @@ func (c *ImageCommitOpts) Load(ctx context.Context, opt map[string]string) (map[
 		return nil, err
 	}
 
+	// DEPOT: This is the default version of our export response format.
+	// It would add the manifest and config to the annotations.
+	c.ExportImageVersion = ExportImageVersionV1
+
 	for k, v := range opt {
 		var err error
 		switch exptypes.ImageExporterOptKey(k) {
@@ -52,6 +78,13 @@ func (c *ImageCommitOpts) Load(ctx context.Context, opt map[string]string) (map[
 			err = parseBool(&c.ForceInlineAttestations, k, v)
 		case exptypes.OptKeyPreferNondistLayers:
 			err = parseBool(&c.RefCfg.PreferNonDistributable, k, v)
+		case DepotExportImageVersion:
+			var i int
+			i, err = strconv.Atoi(v)
+			if err != nil {
+				break
+			}
+			c.ExportImageVersion = ExportImageVersion(i)
 		default:
 			rest[k] = v
 		}

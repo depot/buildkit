@@ -25,6 +25,10 @@ const (
 	// already found to use a non-distributable media type.
 	// When this option is not set, the exporter will change the media type of the layer to a distributable one.
 	keyPreferNondistLayers = "prefer-nondist-layers"
+
+	// DepotExportImageVersion returns the manifest and config for the image via response.
+	// Previously, we returned it via annotations, but that was not compatible with GCR.
+	DepotExportImageVersion = "depot.export.image.version"
 )
 
 type ImageCommitOpts struct {
@@ -38,7 +42,23 @@ type ImageCommitOpts struct {
 
 	BuildInfo      bool // Deprecated: Build information is deprecated: https://github.com/moby/buildkit/blob/master/docs/deprecated.md
 	BuildInfoAttrs bool // Deprecated: Build information is deprecated: https://github.com/moby/buildkit/blob/master/docs/deprecated.md
+
+	// DEPOT: ExportImageVersion determines the response format to the CLI.
+	// Previously (aka v1) we returned the manifest and config via annotations.
+	// In V2 we return the manifest and config via response.
+	ExportImageVersion ExportImageVersion
 }
+
+type ExportImageVersion int
+
+const (
+	ExportImageVersionUnknown ExportImageVersion = iota
+	// ExportImageVersionV1 is the default version for backwards compatibility.
+	// It uses annotations to return the manifest and config.
+	ExportImageVersionV1
+	// ExportImageVersionV2 returns the manifest and config via response.
+	ExportImageVersionV2
+)
 
 func (c *ImageCommitOpts) Load(opt map[string]string) (map[string]string, error) {
 	rest := make(map[string]string)
@@ -53,6 +73,10 @@ func (c *ImageCommitOpts) Load(opt map[string]string) (map[string]string, error)
 	if err != nil {
 		return nil, err
 	}
+
+	// DEPOT: This is the default version of our export response format.
+	// It would add the manifest and config to the annotations.
+	c.ExportImageVersion = ExportImageVersionV1
 
 	for k, v := range opt {
 		var err error
@@ -81,6 +105,13 @@ func (c *ImageCommitOpts) Load(opt map[string]string) (map[string]string, error)
 			err = parseBool(&c.ForceInlineAttestations, k, v)
 		case keyPreferNondistLayers:
 			err = parseBool(&c.RefCfg.PreferNonDistributable, k, v)
+		case DepotExportImageVersion:
+			var i int
+			i, err = strconv.Atoi(v)
+			if err != nil {
+				break
+			}
+			c.ExportImageVersion = ExportImageVersion(i)
 		default:
 			rest[k] = v
 		}

@@ -252,7 +252,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 	}()
 
-	desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
+	committed, desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -394,6 +394,23 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		return nil, nil, err
 	}
 	resp[exptypes.ExporterImageDescriptorKey] = base64.StdEncoding.EncodeToString(dtdesc)
+
+	// DEPOT: we return all manifests and configs to use for loading the image in the CLI.
+	// We use this because the garbage collector could remove them before download.
+	if opts.ExportImageVersion == ExportImageVersionV2 {
+		exportedImages := make([]depot.ExportedImage, len(committed))
+		for i := range committed {
+			exportedImages[i].Manifest = committed[i].ManifestBytes
+			exportedImages[i].Config = committed[i].ConfigBytes
+		}
+
+		octets, err := json.Marshal(exportedImages)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		resp[depot.ImagesExported] = base64.StdEncoding.EncodeToString(octets)
+	}
 
 	return resp, nil, nil
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/network/cniprovider"
 	"github.com/moby/buildkit/util/network/netproviders"
 	"github.com/moby/buildkit/util/resolver"
@@ -156,10 +157,11 @@ func init() {
 		Name:  "oci-worker-gc-keepstorage",
 		Usage: "Amount of storage GC keep locally (MB)",
 		Value: func() int64 {
-			if defaultConf.Workers.OCI.GCKeepStorage != 0 {
-				return defaultConf.Workers.OCI.GCKeepStorage / 1e6
+			keep := defaultConf.Workers.OCI.GCKeepStorage.AsBytes(defaultConf.Root)
+			if keep == 0 {
+				keep = config.DetectDefaultGCCap().AsBytes(defaultConf.Root)
 			}
-			return config.DetectDefaultGCCap(defaultConf.Root) / 1e6
+			return keep / 1e6
 		}(),
 		Hidden: len(defaultConf.Workers.OCI.GCPolicy) != 0,
 	})
@@ -224,7 +226,7 @@ func applyOCIFlags(c *cli.Context, cfg *config.Config) error {
 	}
 
 	if c.GlobalIsSet("oci-worker-gc-keepstorage") {
-		cfg.Workers.OCI.GCKeepStorage = c.GlobalInt64("oci-worker-gc-keepstorage") * 1e6
+		cfg.Workers.OCI.GCKeepStorage = config.DiskSpace{Bytes: c.GlobalInt64("oci-worker-gc-keepstorage") * 1e6}
 	}
 
 	if c.GlobalIsSet("oci-worker-net") {
@@ -282,7 +284,7 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 	}
 
 	if cfg.Rootless {
-		logrus.Debugf("running in rootless mode")
+		bklog.L.Debugf("running in rootless mode")
 		if common.config.Workers.OCI.NetworkConfig.Mode == "auto" {
 			common.config.Workers.OCI.NetworkConfig.Mode = "host"
 		}
@@ -290,7 +292,7 @@ func ociWorkerInitializer(c *cli.Context, common workerInitializerOpt) ([]worker
 
 	processMode := oci.ProcessSandbox
 	if cfg.NoProcessSandbox {
-		logrus.Warn("NoProcessSandbox is enabled. Note that NoProcessSandbox allows build containers to kill (and potentially ptrace) an arbitrary process in the BuildKit host namespace. NoProcessSandbox should be enabled only when the BuildKit is running in a container as an unprivileged user.")
+		bklog.L.Warn("NoProcessSandbox is enabled. Note that NoProcessSandbox allows build containers to kill (and potentially ptrace) an arbitrary process in the BuildKit host namespace. NoProcessSandbox should be enabled only when the BuildKit is running in a container as an unprivileged user.")
 		if !cfg.Rootless {
 			return nil, errors.New("can't enable NoProcessSandbox without Rootless")
 		}
@@ -374,15 +376,15 @@ func snapshotterFactory(commonRoot string, cfg config.OCIConfig, sm *session.Man
 		if err := overlayutils.Supported(commonRoot); err == nil {
 			name = "overlayfs"
 		} else {
-			logrus.Debugf("auto snapshotter: overlayfs is not available for %s, trying fuse-overlayfs: %v", commonRoot, err)
+			bklog.L.Debugf("auto snapshotter: overlayfs is not available for %s, trying fuse-overlayfs: %v", commonRoot, err)
 			if err2 := fuseoverlayfs.Supported(commonRoot); err2 == nil {
 				name = "fuse-overlayfs"
 			} else {
-				logrus.Debugf("auto snapshotter: fuse-overlayfs is not available for %s, falling back to native: %v", commonRoot, err2)
+				bklog.L.Debugf("auto snapshotter: fuse-overlayfs is not available for %s, falling back to native: %v", commonRoot, err2)
 				name = "native"
 			}
 		}
-		logrus.Infof("auto snapshotter: using %s", name)
+		bklog.L.Infof("auto snapshotter: using %s", name)
 	}
 
 	snFactory := runc.SnapshotterFactory{
@@ -419,7 +421,7 @@ func snapshotterFactory(commonRoot string, cfg config.OCIConfig, sm *session.Man
 		snFactory.New = func(root string) (ctdsnapshot.Snapshotter, error) {
 			userxattr, err := overlayutils.NeedsUserXAttr(root)
 			if err != nil {
-				logrus.WithError(err).Warnf("cannot detect whether \"userxattr\" option needs to be used, assuming to be %v", userxattr)
+				bklog.L.WithError(err).Warnf("cannot detect whether \"userxattr\" option needs to be used, assuming to be %v", userxattr)
 			}
 			opq := sgzlayer.OverlayOpaqueTrusted
 			if userxattr {
@@ -449,7 +451,7 @@ func validOCIBinary() bool {
 	_, err := exec.LookPath("runc")
 	_, err1 := exec.LookPath("buildkit-runc")
 	if err != nil && err1 != nil {
-		logrus.Warnf("skipping oci worker, as runc does not exist")
+		bklog.L.Warnf("skipping oci worker, as runc does not exist")
 		return false
 	}
 	return true

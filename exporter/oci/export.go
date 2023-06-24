@@ -11,9 +11,7 @@ import (
 
 	archiveexporter "github.com/containerd/containerd/images/archive"
 	"github.com/containerd/containerd/leases"
-	"github.com/containerd/containerd/remotes"
 	"github.com/docker/distribution/reference"
-	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/exporter"
@@ -67,12 +65,11 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 			RefCfg: cacheconfig.RefConfig{
 				Compression: compression.New(compression.Default),
 			},
-			BuildInfo: true,
-			OCITypes:  e.opt.Variant == VariantOCI,
+			OCITypes: e.opt.Variant == VariantOCI,
 		},
 	}
 
-	opt, err := i.opts.Load(opt)
+	opt, err := i.opts.Load(ctx, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +264,6 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 		report(nil)
 	} else {
-		ctx = remotes.WithMediaTypeKeyPrefix(ctx, intoto.PayloadType, "intoto")
 		store := sessioncontent.NewCallerStore(caller, "export")
 		if err != nil {
 			return nil, nil, err

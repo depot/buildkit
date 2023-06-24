@@ -44,9 +44,11 @@ func TestClientGatewayIntegration(t *testing.T) {
 		testClientGatewayContainerPID1Fail,
 		testClientGatewayContainerPID1Exit,
 		testClientGatewayContainerMounts,
+		testClientGatewayContainerSecretEnv,
 		testClientGatewayContainerPID1Tty,
 		testClientGatewayContainerCancelPID1Tty,
 		testClientGatewayContainerExecTty,
+		testClientGatewayContainerCancelExecTty,
 		testClientSlowCacheRootfsRef,
 		testClientGatewayContainerPlatformPATH,
 		testClientGatewayExecError,
@@ -842,6 +844,75 @@ func testClientGatewayContainerMounts(t *testing.T, sb integration.Sandbox) {
 	checkAllReleasable(t, c, sb, true)
 }
 
+func testClientGatewayContainerSecretEnv(t *testing.T, sb integration.Sandbox) {
+	requiresLinux(t)
+
+	ctx := sb.Context()
+
+	c, err := New(ctx, sb.Address())
+	require.NoError(t, err)
+	defer c.Close()
+
+	product := "buildkit_test"
+
+	b := func(ctx context.Context, c client.Client) (*client.Result, error) {
+		mounts := map[string]llb.State{
+			"/": llb.Image("busybox:latest"),
+		}
+
+		var containerMounts []client.Mount
+		for mountpoint, st := range mounts {
+			def, err := st.Marshal(ctx)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to marshal state")
+			}
+
+			r, err := c.Solve(ctx, client.SolveRequest{
+				Definition: def.ToPB(),
+			})
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to solve")
+			}
+			containerMounts = append(containerMounts, client.Mount{
+				Dest:      mountpoint,
+				MountType: pb.MountType_BIND,
+				Ref:       r.Ref,
+			})
+		}
+
+		ctr, err := c.NewContainer(ctx, client.NewContainerRequest{Mounts: containerMounts})
+		if err != nil {
+			return nil, err
+		}
+
+		pid, err := ctr.Start(ctx, client.StartRequest{
+			Args: []string{"sh", "-c", "test $SOME_SECRET = foo-secret"},
+			SecretEnv: []*pb.SecretEnv{
+				{
+					ID:   "sekrit",
+					Name: "SOME_SECRET",
+				},
+			},
+		})
+		require.NoError(t, err)
+		err = pid.Wait()
+		require.NoError(t, err)
+
+		return &client.Result{}, ctr.Release(ctx)
+	}
+
+	_, err = c.Build(ctx, SolveOpt{
+		Session: []session.Attachable{
+			secretsprovider.FromMap(map[string][]byte{
+				"sekrit": []byte("foo-secret"),
+			}),
+		},
+	}, product, b, nil)
+	require.NoError(t, err)
+
+	checkAllReleasable(t, c, sb, true)
+}
+
 // testClientGatewayContainerPID1Tty is testing that we can get a tty via
 // a container pid1, executor.Run
 func testClientGatewayContainerPID1Tty(t *testing.T, sb integration.Sandbox) {
@@ -1136,6 +1207,87 @@ func testClientGatewayContainerExecTty(t *testing.T, sb integration.Sandbox) {
 	require.ErrorAs(t, err, &exitError)
 	require.Equal(t, uint32(99), exitError.ExitCode)
 	require.Regexp(t, "exit code: 99", err.Error())
+
+	inputW.Close()
+	inputR.Close()
+
+	checkAllReleasable(t, c, sb, true)
+}
+
+// testClientGatewayContainerExecTty is testing the tty shuts down cleanly
+// on context.Cancel
+func testClientGatewayContainerCancelExecTty(t *testing.T, sb integration.Sandbox) {
+	requiresLinux(t)
+	ctx := sb.Context()
+
+	c, err := New(ctx, sb.Address())
+	require.NoError(t, err)
+	defer c.Close()
+
+	product := "buildkit_test"
+
+	inputR, inputW := io.Pipe()
+	output := bytes.NewBuffer(nil)
+	b := func(ctx context.Context, c client.Client) (*client.Result, error) {
+		ctx, timeout := context.WithTimeout(ctx, 10*time.Second)
+		defer timeout()
+		st := llb.Image("busybox:latest")
+
+		def, err := st.Marshal(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to marshal state")
+		}
+
+		r, err := c.Solve(ctx, client.SolveRequest{
+			Definition: def.ToPB(),
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to solve")
+		}
+
+		ctr, err := c.NewContainer(ctx, client.NewContainerRequest{
+			Mounts: []client.Mount{{
+				Dest:      "/",
+				MountType: pb.MountType_BIND,
+				Ref:       r.Ref,
+			}},
+		})
+		require.NoError(t, err)
+
+		pid1, err := ctr.Start(ctx, client.StartRequest{
+			Args: []string{"sleep", "10"},
+		})
+		require.NoError(t, err)
+
+		defer pid1.Wait()
+		defer ctr.Release(ctx)
+
+		execCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		prompt := newTestPrompt(execCtx, t, inputW, output)
+		pid2, err := ctr.Start(execCtx, client.StartRequest{
+			Args:   []string{"sh"},
+			Tty:    true,
+			Stdin:  inputR,
+			Stdout: &nopCloser{output},
+			Stderr: &nopCloser{output},
+			Env:    []string{fmt.Sprintf("PS1=%s", prompt.String())},
+		})
+		require.NoError(t, err)
+
+		prompt.SendExpect("echo hi", "hi")
+		cancel()
+
+		err = pid2.Wait()
+		require.ErrorIs(t, err, context.Canceled)
+
+		return &client.Result{}, err
+	}
+
+	_, err = c.Build(ctx, SolveOpt{}, product, b, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), context.Canceled.Error())
 
 	inputW.Close()
 	inputR.Close()

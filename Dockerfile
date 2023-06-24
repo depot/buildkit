@@ -1,18 +1,27 @@
 # syntax=docker/dockerfile-upstream:master
 
-ARG RUNC_VERSION=v1.1.5
-ARG CONTAINERD_VERSION=v1.6.18
-# containerd v1.5 for integration tests
-ARG CONTAINERD_ALT_VERSION_15=v1.5.18
+ARG RUNC_VERSION=v1.1.7
+ARG CONTAINERD_VERSION=v1.7.1
+# containerd v1.6 for integration tests
+ARG CONTAINERD_ALT_VERSION_16=v1.6.21
 ARG REGISTRY_VERSION=2.8.0
 ARG ROOTLESSKIT_VERSION=v1.0.1
-ARG CNI_VERSION=v1.1.1
-ARG STARGZ_SNAPSHOTTER_VERSION=v0.13.0
-ARG NERDCTL_VERSION=v1.0.0
+ARG CNI_VERSION=v1.2.0
+ARG STARGZ_SNAPSHOTTER_VERSION=v0.14.3
+ARG NERDCTL_VERSION=v1.4.0
 ARG DNSNAME_VERSION=v1.3.1
-ARG NYDUS_VERSION=v2.1.0
+ARG NYDUS_VERSION=v2.1.6
+ARG MINIO_VERSION=RELEASE.2022-05-03T20-36-08Z
+ARG MINIO_MC_VERSION=RELEASE.2022-05-04T06-07-55Z
+ARG AZURITE_VERSION=3.18.0
+ARG GOTESTSUM_VERSION=v1.9.0
 
+ARG GO_VERSION=1.20
 ARG ALPINE_VERSION=3.17
+
+# minio for s3 integration tests
+FROM minio/minio:${MINIO_VERSION} AS minio
+FROM minio/mc:${MINIO_MC_VERSION} AS minio-mc
 
 # alpine base for buildkit image
 # TODO: remove this when alpine image supports riscv64
@@ -28,7 +37,7 @@ FROM alpine-$TARGETARCH AS alpinebase
 FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.2.1 AS xx
 
 # go base image
-FROM --platform=$BUILDPLATFORM golang:1.19-alpine${ALPINE_VERSION} AS golatest
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS golatest
 
 # git stage is used for checking out remote repository sources
 FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS git
@@ -100,12 +109,10 @@ RUN --mount=target=. --mount=target=/root/.cache,type=cache \
   CGO_ENABLED=0 xx-go build -ldflags "$(cat /tmp/.ldflags) -extldflags '-static'" -tags "osusergo netgo static_build seccomp ${BUILDKITD_TAGS}" -o /usr/bin/buildkitd ./cmd/buildkitd && \
   xx-verify --static /usr/bin/buildkitd
 
-FROM scratch AS binaries-linux-helper
+FROM scratch AS binaries-linux
 COPY --link --from=runc /usr/bin/runc /buildkit-runc
 # built from https://github.com/tonistiigi/binfmt/releases/tag/buildkit%2Fv7.1.0-30
 COPY --link --from=tonistiigi/binfmt:buildkit-v7.1.0-30@sha256:45dd57b4ba2f24e2354f71f1e4e51f073cb7a28fd848ce6f5f2a7701142a6bf0 / /
-
-FROM binaries-linux-helper AS binaries-linux
 COPY --link --from=buildctl /usr/bin/buildctl /
 COPY --link --from=buildkitd /usr/bin/buildkitd /
 
@@ -158,12 +165,12 @@ RUN --mount=from=containerd-src,src=/usr/src/containerd,readwrite --mount=target
   && make bin/ctr \
   && mv bin /out
 
-# containerd v1.5 for integration tests
-FROM containerd-base as containerd-alt-15
-ARG CONTAINERD_ALT_VERSION_15
+# containerd v1.6 for integration tests
+FROM containerd-base as containerd-alt-16
+ARG CONTAINERD_ALT_VERSION_16
 RUN --mount=from=containerd-src,src=/usr/src/containerd,readwrite --mount=target=/root/.cache,type=cache \
   git fetch origin \
-  && git checkout -q "$CONTAINERD_ALT_VERSION_15" \
+  && git checkout -q "$CONTAINERD_ALT_VERSION_16" \
   && make bin/containerd \
   && make bin/containerd-shim-runc-v2 \
   && mv bin /out
@@ -201,6 +208,12 @@ SHELL ["/bin/bash", "-c"]
 RUN wget https://github.com/dragonflyoss/image-service/releases/download/$NYDUS_VERSION/nydus-static-$NYDUS_VERSION-$TARGETOS-$TARGETARCH.tgz
 RUN mkdir -p /out/nydus-static && tar xzvf nydus-static-$NYDUS_VERSION-$TARGETOS-$TARGETARCH.tgz -C /out
 
+FROM gobuild-base AS gotestsum
+ARG GOTESTSUM_VERSION
+RUN --mount=target=/root/.cache,type=cache \
+  GOBIN=/out/ go install "gotest.tools/gotestsum@${GOTESTSUM_VERSION}" && \
+  /out/gotestsum --version
+
 FROM buildkit-export AS buildkit-linux
 COPY --link --from=binaries / /usr/bin/
 ENTRYPOINT ["buildkitd"]
@@ -222,28 +235,35 @@ COPY --link --from=dnsname /usr/bin/dnsname /opt/cni/bin/
 
 FROM buildkit-base AS integration-tests-base
 ENV BUILDKIT_INTEGRATION_ROOTLESS_IDPAIR="1000:1000"
-ARG NERDCTL_VERSION
-RUN apk add --no-cache shadow shadow-uidmap sudo vim iptables ip6tables dnsmasq fuse curl git-daemon \
+RUN apk add --no-cache shadow shadow-uidmap sudo vim iptables ip6tables dnsmasq fuse curl git-daemon openssh-client \
   && useradd --create-home --home-dir /home/user --uid 1000 -s /bin/sh user \
   && echo "XDG_RUNTIME_DIR=/run/user/1000; export XDG_RUNTIME_DIR" >> /home/user/.profile \
   && mkdir -m 0700 -p /run/user/1000 \
   && chown -R user /run/user/1000 /home/user \
   && ln -s /sbin/iptables-legacy /usr/bin/iptables \
-  && xx-go --wrap \
-  && curl -Ls https://raw.githubusercontent.com/containerd/nerdctl/$NERDCTL_VERSION/extras/rootless/containerd-rootless.sh > /usr/bin/containerd-rootless.sh \
+  && xx-go --wrap
+ARG NERDCTL_VERSION
+RUN curl -Ls https://raw.githubusercontent.com/containerd/nerdctl/$NERDCTL_VERSION/extras/rootless/containerd-rootless.sh > /usr/bin/containerd-rootless.sh \
   && chmod 0755 /usr/bin/containerd-rootless.sh
+ARG AZURITE_VERSION
+RUN apk add --no-cache nodejs npm \
+  && npm install -g azurite@${AZURITE_VERSION}
 # The entrypoint script is needed for enabling nested cgroup v2 (https://github.com/moby/buildkit/issues/3265#issuecomment-1309631736)
 RUN curl -Ls https://raw.githubusercontent.com/moby/moby/v20.10.21/hack/dind > /docker-entrypoint.sh \
   && chmod 0755 /docker-entrypoint.sh
 ENTRYPOINT ["/docker-entrypoint.sh"]
 # musl is needed to directly use the registry binary that is built on alpine
-ENV BUILDKIT_INTEGRATION_CONTAINERD_EXTRA="containerd-1.5=/opt/containerd-alt-15/bin"
+ENV BUILDKIT_INTEGRATION_CONTAINERD_EXTRA="containerd-1.6=/opt/containerd-alt-16/bin"
 ENV BUILDKIT_INTEGRATION_SNAPSHOTTER=stargz
 ENV CGO_ENABLED=0
+ENV GOTESTSUM_FORMAT=standard-verbose
+COPY --link --from=gotestsum /out/gotestsum /usr/bin/
+COPY --link --from=minio /opt/bin/minio /usr/bin/
+COPY --link --from=minio-mc /usr/bin/mc /usr/bin/
 COPY --link --from=nydus /out/nydus-static/* /usr/bin/
 COPY --link --from=stargz-snapshotter /out/* /usr/bin/
 COPY --link --from=rootlesskit /rootlesskit /usr/bin/
-COPY --link --from=containerd-alt-15 /out/containerd* /opt/containerd-alt-15/bin/
+COPY --link --from=containerd-alt-16 /out/containerd* /opt/containerd-alt-16/bin/
 COPY --link --from=registry /bin/registry /usr/bin/
 COPY --link --from=runc /usr/bin/runc /usr/bin/
 COPY --link --from=containerd /out/containerd* /usr/bin/

@@ -190,7 +190,7 @@ func (c *grpcClient) Run(ctx context.Context, f client.BuildFunc) (retError erro
 				}
 			}
 			if retError != nil {
-				st, _ := status.FromError(grpcerrors.ToGRPC(retError))
+				st, _ := status.FromError(grpcerrors.ToGRPC(ctx, retError))
 				stp := st.Proto()
 				req.Error = &rpc.Status{
 					Code:    stp.Code,
@@ -792,6 +792,7 @@ func (c *grpcClient) NewContainer(ctx context.Context, req client.NewContainerRe
 		Constraints: req.Constraints,
 		Network:     req.NetMode,
 		ExtraHosts:  req.ExtraHosts,
+		Hostname:    req.Hostname,
 	})
 	if err != nil {
 		return nil, err
@@ -805,6 +806,7 @@ func (c *grpcClient) NewContainer(ctx context.Context, req client.NewContainerRe
 
 	return &container{
 		client:   c.client,
+		caps:     c.caps,
 		id:       id,
 		execMsgs: c.execMsgs,
 	}, nil
@@ -812,6 +814,7 @@ func (c *grpcClient) NewContainer(ctx context.Context, req client.NewContainerRe
 
 type container struct {
 	client   pb.LLBBridgeClient
+	caps     apicaps.CapSet
 	id       string
 	execMsgs *messageForwarder
 }
@@ -819,6 +822,12 @@ type container struct {
 func (ctr *container) Start(ctx context.Context, req client.StartRequest) (client.ContainerProcess, error) {
 	pid := fmt.Sprintf("%s:%s", ctr.id, identity.NewID())
 	msgs := ctr.execMsgs.Register(pid)
+
+	if len(req.SecretEnv) > 0 {
+		if err := ctr.caps.Supports(pb.CapGatewayExecSecretEnv); err != nil {
+			return nil, err
+		}
+	}
 
 	init := &pb.InitMessage{
 		ContainerID: ctr.id,
@@ -828,8 +837,9 @@ func (ctr *container) Start(ctx context.Context, req client.StartRequest) (clien
 			Cwd:  req.Cwd,
 			User: req.User,
 		},
-		Tty:      req.Tty,
-		Security: req.SecurityMode,
+		Tty:       req.Tty,
+		Security:  req.SecurityMode,
+		Secretenv: req.SecretEnv,
 	}
 	init.Meta.RemoveMountStubsRecursive = req.RemoveMountStubsRecursive
 	if req.Stdin != nil {

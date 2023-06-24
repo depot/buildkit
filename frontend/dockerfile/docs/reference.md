@@ -63,13 +63,13 @@ Line continuation characters are not supported in comments.
 >     RUN echo hello
 > RUN echo world
 > ```
-> 
+>
 > ```dockerfile
 > # this is a comment-line
 > RUN echo hello
 > RUN echo world
 > ```
-> 
+>
 > Note however, that whitespace in instruction _arguments_, such as the commands
 > following `RUN`, are preserved, so the following example prints `    hello    world`
 > with leading whitespace as specified:
@@ -529,14 +529,14 @@ In the *shell* form you can use a `\` (backslash) to continue a single
 RUN instruction onto the next line. For example, consider these two lines:
 
 ```dockerfile
-RUN /bin/bash -c 'source $HOME/.bashrc; \
+RUN /bin/bash -c 'source $HOME/.bashrc && \
 echo $HOME'
 ```
 
 Together they are equivalent to this single line:
 
 ```dockerfile
-RUN /bin/bash -c 'source $HOME/.bashrc; echo $HOME'
+RUN /bin/bash -c 'source $HOME/.bashrc && echo $HOME'
 ```
 
 To use a different shell, other than '/bin/sh', use the *exec* form passing in
@@ -570,7 +570,7 @@ expansion, not docker.
 > ```dockerfile
 > RUN ["c:\windows\system32\tasklist.exe"]
 > ```
-> 
+>
 > The correct syntax for this example is:
 >
 > ```dockerfile
@@ -587,19 +587,6 @@ See the [`Dockerfile` Best Practices
 guide](https://docs.docker.com/engine/userguide/eng-image/dockerfile_best-practices/) for more information.
 
 The cache for `RUN` instructions can be invalidated by [`ADD`](#add) and [`COPY`](#copy) instructions.
-
-### Known issues (RUN)
-
-- [Issue 783](https://github.com/docker/docker/issues/783) is about file
-  permissions problems that can occur when using the AUFS file system. You
-  might notice it during an attempt to `rm` a file, for example.
-
-  For systems that have recent aufs version (i.e., `dirperm1` mount option can
-  be set), docker will attempt to fix the issue automatically by mounting
-  the layers with `dirperm1` option. More details on `dirperm1` option can be
-  found at [`aufs` man page](https://github.com/sfjro/aufs3-linux/tree/aufs3.18/Documentation/filesystems/aufs)
-
-  If your system doesn't have support for `dirperm1`, the issue describes a workaround.
 
 ## RUN --mount
 
@@ -809,7 +796,7 @@ The command is run in the host's network environment (similar to
 
 > **Warning**
 >
-> The use of `--network=host` is protected by the `network.host` entitlement, 
+> The use of `--network=host` is protected by the `network.host` entitlement,
 > which needs to be enabled when starting the buildkitd daemon with
 > `--allow-insecure-entitlement network.host` flag or in [buildkitd config](https://github.com/moby/buildkit/blob/master/docs/buildkitd.toml.md),
 > and for a build request with [`--allow network.host` flag](https://docs.docker.com/engine/reference/commandline/buildx_build/#allow).
@@ -952,7 +939,7 @@ LABEL multi.label1="value1" \
 ```
 
 > **Note**
-> 
+>
 > Be sure to use double quotes and not single quotes. Particularly when you are
 > using string interpolation (e.g. `LABEL example="foo-$ENV_VAR"`), single
 > quotes will take the string as is without unpacking the variable's value.
@@ -963,10 +950,12 @@ the most-recently-applied value overrides any previously-set value.
 
 To view an image's labels, use the `docker image inspect` command. You can use
 the `--format` option to show just the labels;
- 
+
+{% raw %}
 ```console
 $ docker image inspect --format='{{json .Config.Labels}}' myimage
 ```
+{% endraw %}
 
 ```json
 {
@@ -1094,7 +1083,7 @@ image, consider setting a value for a single command instead:
 ```dockerfile
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y ...
 ```
- 
+
 Or using [`ARG`](#arg), which is not persisted in the final image:
 
 ```dockerfile
@@ -1110,7 +1099,7 @@ RUN apt-get update && apt-get install -y ...
 > ```dockerfile
 > ENV MY_VAR my-value
 > ```
-> 
+>
 > This syntax does not allow for multiple environment-variables to be set in a
 > single `ENV` instruction, and can be confusing. For example, the following
 > sets a single environment variable (`ONE`) with value `"TWO= THREE=world"`:
@@ -1118,7 +1107,7 @@ RUN apt-get update && apt-get install -y ...
 > ```dockerfile
 > ENV ONE TWO= THREE=world
 > ```
-> 
+>
 > The alternative syntax is supported for backward compatibility, but discouraged
 > for the reasons outlined above, and may be removed in a future release.
 
@@ -1127,19 +1116,25 @@ RUN apt-get update && apt-get install -y ...
 ADD has two forms:
 
 ```dockerfile
-ADD [--chown=<user>:<group>] [--checksum=<checksum>] <src>... <dest>
-ADD [--chown=<user>:<group>] ["<src>",... "<dest>"]
+ADD [--chown=<user>:<group>] [--chmod=<perms>] [--checksum=<checksum>] <src>... <dest>
+ADD [--chown=<user>:<group>] [--chmod=<perms>] ["<src>",... "<dest>"]
 ```
 
 The latter form is required for paths containing whitespace.
 
 > **Note**
 >
-> The `--chown` feature is only supported on Dockerfiles used to build Linux containers,
+> The `--chown` and `--chmod` features are only supported on Dockerfiles used to build Linux containers,
 > and will not work on Windows containers. Since user and group ownership concepts do
 > not translate between Linux and Windows, the use of `/etc/passwd` and `/etc/group` for
 > translating user and group names to IDs restricts this feature to only be viable
 > for Linux OS-based containers.
+
+> **Note**
+>
+> `--chmod` is supported since [Dockerfile 1.3](https://docs.docker.com/build/buildkit/dockerfile-frontend/).
+> Only octal notation is currently supported. Non-octal support is tracked in
+> [moby/buildkit#1951](https://github.com/moby/buildkit/issues/1951).
 
 The `ADD` instruction copies new files, directories or remote file URLs from `<src>`
 and adds them to the filesystem of the image at the path `<dest>`.
@@ -1204,6 +1199,7 @@ ADD --chown=55:mygroup files* /somedir/
 ADD --chown=bin files* /somedir/
 ADD --chown=1 files* /somedir/
 ADD --chown=10:11 files* /somedir/
+ADD --chown=myuser:mygroup --chmod=655 files* /somedir/
 ```
 
 If the container root filesystem does not contain either `/etc/passwd` or
@@ -1359,15 +1355,15 @@ See [`COPY --link`](#copy---link).
 COPY has two forms:
 
 ```dockerfile
-COPY [--chown=<user>:<group>] <src>... <dest>
-COPY [--chown=<user>:<group>] ["<src>",... "<dest>"]
+COPY [--chown=<user>:<group>] [--chmod=<perms>] <src>... <dest>
+COPY [--chown=<user>:<group>] [--chmod=<perms>] ["<src>",... "<dest>"]
 ```
 
 This latter form is required for paths containing whitespace
 
 > **Note**
 >
-> The `--chown` feature is only supported on Dockerfiles used to build Linux containers,
+> The `--chown` and `--chmod` features are only supported on Dockerfiles used to build Linux containers,
 > and will not work on Windows containers. Since user and group ownership concepts do
 > not translate between Linux and Windows, the use of `/etc/passwd` and `/etc/group` for
 > translating user and group names to IDs restricts this feature to only be viable for
@@ -1435,6 +1431,7 @@ COPY --chown=55:mygroup files* /somedir/
 COPY --chown=bin files* /somedir/
 COPY --chown=1 files* /somedir/
 COPY --chown=10:11 files* /somedir/
+COPY --chown=myuser:mygroup --chmod=644 files* /somedir/
 ```
 
 If the container root filesystem does not contain either `/etc/passwd` or
@@ -1481,7 +1478,7 @@ attempted to be used instead.
 
 - If `<dest>` doesn't exist, it is created along with all missing directories
   in its path.
-  
+
 > **Note**
 >
 > The first encountered `COPY` instruction will invalidate the cache for all
@@ -1983,7 +1980,7 @@ RUN pwd
 The output of the final `pwd` command in this `Dockerfile` would be
 `/path/$DIRNAME`
 
-If not specified, the default working directory is `/`. In practice, if you aren't building a Dockerfile from scratch (`FROM scratch`), 
+If not specified, the default working directory is `/`. In practice, if you aren't building a Dockerfile from scratch (`FROM scratch`),
 the `WORKDIR` may likely be set by the base image you're using.
 
 Therefore, to avoid unintended operations in unknown directories, it is best practice to set your `WORKDIR` explicitly.
@@ -2018,7 +2015,7 @@ ARG buildno
 > It is not recommended to use build-time variables for passing secrets like
 > GitHub keys, user credentials etc. Build-time variable values are visible to
 > any user of the image with the `docker history` command.
-> 
+>
 > Refer to the [`RUN --mount=type=secret`](#run---mounttypesecret) section to
 > learn about secure ways to use secrets when building images.
 {:.warning}
@@ -2045,25 +2042,25 @@ elsewhere.  For example, consider this Dockerfile:
 
 ```dockerfile
 FROM busybox
-USER ${user:-some_user}
-ARG user
-USER $user
+USER ${username:-some_user}
+ARG username
+USER $username
 # ...
 ```
 
 A user builds this file by calling:
 
 ```console
-$ docker build --build-arg user=what_user .
+$ docker build --build-arg username=what_user .
 ```
 
-The `USER` at line 2 evaluates to `some_user` as the `user` variable is defined on the
-subsequent line 3. The `USER` at line 4 evaluates to `what_user` as `user` is
+The `USER` at line 2 evaluates to `some_user` as the `username` variable is defined on the
+subsequent line 3. The `USER` at line 4 evaluates to `what_user`, as the `username` argument is
 defined and the `what_user` value was passed on the command line. Prior to its definition by an
 `ARG` instruction, any use of a variable results in an empty string.
 
 An `ARG` instruction goes out of scope at the end of the build
-stage where it was defined. To use an arg in multiple stages, each stage must
+stage where it was defined. To use an argument in multiple stages, each stage must
 include the `ARG` instruction.
 
 ```dockerfile
@@ -2213,23 +2210,15 @@ RUN echo "I'm building for $TARGETPLATFORM"
 
 ### BuildKit built-in build args
 
-| Arg                                   | Type   | Description                                                                                                                                                                                       |
-|---------------------------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `BUILDKIT_CACHE_MOUNT_NS`             | String | Set optional cache ID namespace.                                                                                                                                                                  |
-| `BUILDKIT_CONTEXT_KEEP_GIT_DIR`       | Bool   | Trigger git context to keep the `.git` directory.                                                                                                                                                 |
-| `BUILDKIT_BUILDINFO`                  | Bool   | Enable build info (default `true`).                                                                                                                                                               |
-| `BUILDKIT_INLINE_BUILDINFO_ATTRS`[^2] | Bool   | Inline build info attributes in image config or not.                                                                                                                                              |
-| `BUILDKIT_INLINE_CACHE`[^2]           | Bool   | Inline cache metadata to image config or not.                                                                                                                                                     |
-| `BUILDKIT_MULTI_PLATFORM`             | Bool   | Opt into determnistic output regardless of multi-platform output or not.                                                                                                                          |
-| `BUILDKIT_SANDBOX_HOSTNAME`           | String | Set the hostname (default `buildkitsandbox`)                                                                                                                                                      |
-| `BUILDKIT_SYNTAX`                     | String | Set frontend image                                                                                                                                                                                |
-| `SOURCE_DATE_EPOCH`                   | Int    | Set the UNIX timestamp for created image and layers. More info from [reproducible builds](https://reproducible-builds.org/docs/source-date-epoch/). Supported since Dockerfile 1.5, BuildKit 0.11 |
-
-> **Warning**
->
-> Build information along `BUILDKIT_BUILDINFO` and `BUILDKIT_INLINE_BUILDINFO_ATTRS`
-> build args are deprecated and will be removed in the next release. See the [BuildKit Deprecated features page](https://github.com/moby/buildkit/blob/master/docs/deprecated.md)
-> for status and alternative recommendation about this feature.
+| Arg                                   | Type   | Description                                                                                                                                                                                                    |
+|---------------------------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `BUILDKIT_CACHE_MOUNT_NS`             | String | Set optional cache ID namespace.                                                                                                                                                                               |
+| `BUILDKIT_CONTEXT_KEEP_GIT_DIR`       | Bool   | Trigger git context to keep the `.git` directory.                                                                                                                                                              |
+| `BUILDKIT_INLINE_CACHE`[^2]           | Bool   | Inline cache metadata to image config or not.                                                                                                                                                                  |
+| `BUILDKIT_MULTI_PLATFORM`             | Bool   | Opt into determnistic output regardless of multi-platform output or not.                                                                                                                                       |
+| `BUILDKIT_SANDBOX_HOSTNAME`           | String | Set the hostname (default `buildkitsandbox`)                                                                                                                                                                   |
+| `BUILDKIT_SYNTAX`                     | String | Set frontend image                                                                                                                                                                                             |
+| `SOURCE_DATE_EPOCH`                   | Int    | Set the UNIX timestamp for created image and layers. More info from [reproducible builds](https://reproducible-builds.org/docs/source-date-epoch/). Supported since Dockerfile 1.5, BuildKit 0.11              |
 
 #### Example: keep `.git` dir
 
@@ -2597,6 +2586,7 @@ here-doc delimiter as part of the same command.
 # syntax=docker/dockerfile:1
 FROM debian
 RUN <<EOT bash
+  set -ex
   apt-get update
   apt-get install -y vim
 EOT

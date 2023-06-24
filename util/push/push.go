@@ -14,8 +14,10 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/docker/distribution/reference"
+	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	"github.com/moby/buildkit/session"
-	"github.com/moby/buildkit/util/attestation"
+	"github.com/moby/buildkit/util/bklog"
+	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/flightcontrol"
 	"github.com/moby/buildkit/util/imageutil"
 	"github.com/moby/buildkit/util/progress"
@@ -27,7 +29,6 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 type pusher struct {
@@ -46,6 +47,7 @@ func Pusher(ctx context.Context, resolver remotes.Resolver, ref string) (remotes
 }
 
 func Push(ctx context.Context, sm *session.Manager, sid string, provider content.Provider, manager content.Manager, dgst digest.Digest, ref string, insecure bool, hosts docker.RegistryHosts, byDigest bool, annotations map[digest.Digest]map[string]string) error {
+	ctx = contentutil.RegisterContentPayloadTypes(ctx)
 	desc := ocispecs.Descriptor{
 		Digest: dgst,
 	}
@@ -251,11 +253,11 @@ func childrenHandler(provider content.Provider) images.HandlerFunc {
 		case images.MediaTypeDockerSchema2Layer, images.MediaTypeDockerSchema2LayerGzip,
 			images.MediaTypeDockerSchema2Config, ocispecs.MediaTypeImageConfig,
 			ocispecs.MediaTypeImageLayer, ocispecs.MediaTypeImageLayerGzip,
-			attestation.MediaTypeDockerSchema2AttestationType:
+			intoto.PayloadType:
 			// childless data types.
 			return nil, nil
 		default:
-			logrus.Warnf("encountered unknown type %v; children may not be fetched", desc.MediaType)
+			bklog.G(ctx).Warnf("encountered unknown type %v; children may not be fetched", desc.MediaType)
 		}
 
 		return descs, nil
@@ -290,7 +292,7 @@ func updateDistributionSourceHandler(manager content.Manager, pushF images.Handl
 		// update distribution source to layer
 		if islayer {
 			if _, err := updateF(ctx, desc); err != nil {
-				logrus.Warnf("failed to update distribution source for layer %v: %v", desc.Digest, err)
+				bklog.G(ctx).Warnf("failed to update distribution source for layer %v: %v", desc.Digest, err)
 			}
 		}
 		return children, nil

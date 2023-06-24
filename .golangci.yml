@@ -12,7 +12,6 @@ run:
 
 linters:
   enable:
-    - deadcode
     - depguard
     - gofmt
     - goimports
@@ -25,7 +24,6 @@ linters:
     - staticcheck
     - typecheck
     - unused
-    - varcheck
     - bodyclose
     - errname
     - makezero
@@ -46,6 +44,7 @@ linters-settings:
   forbidigo:
     forbid:
       - '^fmt\.Errorf(# use errors\.Errorf instead)?$'
+      - 'logrus\.(Trace|Debug|Info|Warn|Warning|Error|Fatal)(f|ln)?\((# use bklog\.G\(ctx\) instead of logrus directly)?'
   importas:
     alias:
       - pkg: "github.com/opencontainers/image-spec/specs-go/v1"
@@ -55,10 +54,10 @@ linters-settings:
     no-unaliased: true
   gosec:
     excludes:
-      - G101  # Potential hardcoded credentials (false positives)
-      - G402  # TLS MinVersion too low
-      - G601  # Implicit memory aliasing in for loop (false positives)
-      - G504  # Import blocklist: net/http/cgi
+      - G101 # Potential hardcoded credentials (false positives)
+      - G402 # TLS MinVersion too low
+      - G601 # Implicit memory aliasing in for loop (false positives)
+      - G504 # Import blocklist: net/http/cgi
     config:
       G306: "0644"
 
@@ -68,5 +67,17 @@ issues:
         - revive
       text: "stutters"
     - linters:
-        - staticcheck
-      text: "SA1019: .*Build information is deprecated: https://github.com/moby/buildkit/blob/master/docs/deprecated.md"
+        - revive
+      text: "empty-block"
+    - linters:
+        - revive
+      text: "superfluous-else"
+    - linters:
+        - revive
+      text: "unused-parameter"
+    - linters:
+        - revive
+      text: "redefines-builtin-id"
+    - linters:
+        - revive
+      text: "if-return"

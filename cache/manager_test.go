@@ -47,6 +47,7 @@ import (
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/iohelper"
 	"github.com/moby/buildkit/util/leaseutil"
+	"github.com/moby/buildkit/util/overlay"
 	"github.com/moby/buildkit/util/winlayers"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -851,7 +852,7 @@ func TestSetBlob(t *testing.T) {
 
 	clean(context.TODO())
 
-	//snap.SetBlob()
+	// snap.SetBlob()
 }
 
 func TestPrune(t *testing.T) {
@@ -1928,7 +1929,7 @@ func TestNondistributableBlobs(t *testing.T) {
 	require.NoError(t, err)
 
 	// Pretend like this is non-distributable
-	desc.MediaType = ocispecs.MediaTypeImageLayerNonDistributable
+	desc.MediaType = ocispecs.MediaTypeImageLayerNonDistributable //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 	desc.URLs = []string{"https://buildkit.moby.dev/foo"}
 
 	cw, err := contentBuffer.Writer(ctx)
@@ -2703,7 +2704,7 @@ func isReadOnly(mnt mount.Mount) bool {
 			hasUpperdir = true
 		}
 	}
-	if mnt.Type == "overlay" {
+	if overlay.IsOverlayMountType(mnt) {
 		return !hasUpperdir
 	}
 	return false

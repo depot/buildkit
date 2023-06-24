@@ -5,7 +5,6 @@ package cache
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 
 	// DEPOT: Using parallel gzip for faster image layer compression
@@ -20,13 +19,13 @@ import (
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 
-	nydusify "github.com/containerd/nydus-snapshotter/pkg/converter"
+	"github.com/containerd/nydus-snapshotter/pkg/converter"
 )
 
 func init() {
 	additionalAnnotations = append(
 		additionalAnnotations,
-		nydusify.LayerAnnotationNydusBlob, nydusify.LayerAnnotationNydusBootstrap, nydusify.LayerAnnotationNydusBlobIDs,
+		converter.LayerAnnotationNydusBlob, converter.LayerAnnotationNydusBootstrap,
 	)
 }
 
@@ -60,7 +59,7 @@ func MergeNydus(ctx context.Context, ref ImmutableRef, comp compression.Config, 
 
 	// Extracts nydus bootstrap from nydus format for each layer.
 	var cm *cacheManager
-	layers := []nydusify.Layer{}
+	layers := []converter.Layer{}
 	blobIDs := []string{}
 	for _, ref := range refs {
 		blobDesc, err := getBlobWithCompressionWithRetry(ctx, ref, comp, s)
@@ -76,7 +75,7 @@ func MergeNydus(ctx context.Context, ref ImmutableRef, comp compression.Config, 
 			cm = ref.cm
 		}
 		blobIDs = append(blobIDs, blobDesc.Digest.Hex())
-		layers = append(layers, nydusify.Layer{
+		layers = append(layers, converter.Layer{
 			Digest:   blobDesc.Digest,
 			ReaderAt: ra,
 		})
@@ -86,7 +85,7 @@ func MergeNydus(ctx context.Context, ref ImmutableRef, comp compression.Config, 
 	pr, pw := io.Pipe()
 	go func() {
 		defer pw.Close()
-		if _, err := nydusify.Merge(ctx, layers, pw, nydusify.MergeOption{
+		if _, err := converter.Merge(ctx, layers, pw, converter.MergeOption{
 			WithTar: true,
 		}); err != nil {
 			pw.CloseWithError(errors.Wrapf(err, "merge nydus bootstrap"))
@@ -127,11 +126,6 @@ func MergeNydus(ctx context.Context, ref ImmutableRef, comp compression.Config, 
 		return nil, errors.Wrap(err, "get info from content store")
 	}
 
-	blobIDsBytes, err := json.Marshal(blobIDs)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal blob ids")
-	}
-
 	desc := ocispecs.Descriptor{
 		Digest:    compressedDgst,
 		Size:      info.Size,
@@ -139,9 +133,7 @@ func MergeNydus(ctx context.Context, ref ImmutableRef, comp compression.Config, 
 		Annotations: map[string]string{
 			containerdUncompressed: uncompressedDgst.Digest().String(),
 			// Use this annotation to identify nydus bootstrap layer.
-			nydusify.LayerAnnotationNydusBootstrap: "true",
-			// Track all blob digests for nydus snapshotter.
-			nydusify.LayerAnnotationNydusBlobIDs: string(blobIDsBytes),
+			converter.LayerAnnotationNydusBootstrap: "true",
 		},
 	}
 

@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"net"
@@ -20,17 +21,20 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+func runCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) error {
+	if logs != nil {
+		setCmdLogs(cmd, logs)
+	}
+	fmt.Fprintf(cmd.Stderr, "> runCmd %v %+v\n", time.Now(), cmd.String())
+	return cmd.Run()
+}
+
 func startCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error) {
 	if logs != nil {
-		b := new(bytes.Buffer)
-		logs["stdout: "+cmd.Path] = b
-		cmd.Stdout = &lockingWriter{Writer: b}
-		b = new(bytes.Buffer)
-		logs["stderr: "+cmd.Path] = b
-		cmd.Stderr = &lockingWriter{Writer: b}
+		setCmdLogs(cmd, logs)
 	}
 
-	fmt.Fprintf(cmd.Stderr, "> startCmd %v %+v\n", time.Now(), cmd.Args)
+	fmt.Fprintf(cmd.Stderr, "> startCmd %v %+v\n", time.Now(), cmd.String())
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -40,8 +44,8 @@ func startCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error
 	stopped := make(chan struct{})
 	stop := make(chan struct{})
 	eg.Go(func() error {
-		st, err := cmd.Process.Wait()
-		fmt.Fprintf(cmd.Stderr, "> stopped %v %+v %v\n", time.Now(), st, st.ExitCode())
+		err := cmd.Wait()
+		fmt.Fprintf(cmd.Stderr, "> stopped %v %+v %v\n", time.Now(), cmd.ProcessState, cmd.ProcessState.ExitCode())
 		close(stopped)
 		select {
 		case <-stop:
@@ -75,7 +79,16 @@ func startCmd(cmd *exec.Cmd, logs map[string]*bytes.Buffer) (func() error, error
 	}, nil
 }
 
-func waitUnix(address string, d time.Duration) error {
+func setCmdLogs(cmd *exec.Cmd, logs map[string]*bytes.Buffer) {
+	b := new(bytes.Buffer)
+	logs["stdout: "+cmd.String()] = b
+	cmd.Stdout = &lockingWriter{Writer: b}
+	b = new(bytes.Buffer)
+	logs["stderr: "+cmd.String()] = b
+	cmd.Stderr = &lockingWriter{Writer: b}
+}
+
+func waitUnix(address string, d time.Duration, cmd *exec.Cmd) error {
 	address = strings.TrimPrefix(address, "unix://")
 	addr, err := net.ResolveUnixAddr("unix", address)
 	if err != nil {
@@ -85,6 +98,10 @@ func waitUnix(address string, d time.Duration) error {
 	step := 50 * time.Millisecond
 	i := 0
 	for {
+		if cmd != nil && cmd.ProcessState != nil {
+			return errors.Errorf("process exited: %s", cmd.String())
+		}
+
 		if conn, err := net.DialUnix("unix", nil, addr); err == nil {
 			conn.Close()
 			break
@@ -166,4 +183,14 @@ func Tmpdir(t *testing.T, appliers ...fstest.Applier) (string, error) {
 		return "", err
 	}
 	return tmpdir, nil
+}
+
+func randomString(n int) string {
+	chars := "abcdefghijklmnopqrstuvwxyz"
+	var b = make([]byte, n)
+	_, _ = rand.Read(b)
+	for k, v := range b {
+		b[k] = chars[v%byte(len(chars))]
+	}
+	return string(b)
 }

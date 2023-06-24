@@ -27,8 +27,6 @@ import (
 	"github.com/moby/buildkit/solver/result"
 	attestationTypes "github.com/moby/buildkit/util/attestation"
 	"github.com/moby/buildkit/util/bklog"
-	"github.com/moby/buildkit/util/buildinfo"
-	binfotypes "github.com/moby/buildkit/util/buildinfo/types"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/progress"
 	"github.com/moby/buildkit/util/purl"
@@ -37,6 +35,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/package-url/packageurl-go"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -104,7 +103,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			}
 		}
 		if len(a.Index)+len(a.IndexDescriptor)+len(a.ManifestDescriptor) > 0 {
-			opts.EnableOCITypes("annotations")
+			opts.EnableOCITypes(ctx, "annotations")
 		}
 	}
 
@@ -129,15 +128,6 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			return nil, nil, err
 		}
 
-		var dtbi []byte
-		if opts.BuildInfo {
-			if dtbi, err = buildinfo.Format(exptypes.ParseKey(inp.Metadata, exptypes.ExporterBuildInfo, p), buildinfo.FormatOpts{
-				RemoveAttrs: !opts.BuildInfoAttrs,
-			}); err != nil {
-				return nil, nil, err
-			}
-		}
-
 		annotations := opts.Annotations.Platform(nil)
 		if len(annotations.Index) > 0 || len(annotations.IndexDescriptor) > 0 {
 			return nil, nil, errors.Errorf("index annotations not supported for single platform export")
@@ -145,7 +135,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 
 		config := exptypes.ParseKey(inp.Metadata, exptypes.ExporterImageConfigKey, p)
 		inlineCache := exptypes.ParseKey(inp.Metadata, exptypes.ExporterInlineCache, p)
-		committed, err := ic.commitDistributionManifest(ctx, opts, ref, config, &remotes[0], annotations, inlineCache, dtbi, opts.Epoch, session.NewGroup(sessionID))
+		committed, err := ic.commitDistributionManifest(ctx, opts, ref, config, &remotes[0], annotations, inlineCache, opts.Epoch, session.NewGroup(sessionID))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -161,7 +151,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 	}
 
 	if len(inp.Attestations) > 0 {
-		opts.EnableOCITypes("attestations")
+		opts.EnableOCITypes(ctx, "attestations")
 	}
 
 	refs := make([]cache.ImmutableRef, 0, len(inp.Refs))
@@ -180,19 +170,11 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 		return nil, nil, err
 	}
 
-	idx := struct {
-		// MediaType is reserved in the OCI spec but
-		// excluded from go types.
-		MediaType string `json:"mediaType,omitempty"`
-
-		ocispecs.Index
-	}{
-		MediaType: ocispecs.MediaTypeImageIndex,
-		Index: ocispecs.Index{
-			Annotations: opts.Annotations.Platform(nil).Index,
-			Versioned: specs.Versioned{
-				SchemaVersion: 2,
-			},
+	idx := ocispecs.Index{
+		MediaType:   ocispecs.MediaTypeImageIndex,
+		Annotations: opts.Annotations.Platform(nil).Index,
+		Versioned: specs.Versioned{
+			SchemaVersion: 2,
 		},
 	}
 
@@ -215,15 +197,6 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 		config := exptypes.ParseKey(inp.Metadata, exptypes.ExporterImageConfigKey, p)
 		inlineCache := exptypes.ParseKey(inp.Metadata, exptypes.ExporterInlineCache, p)
 
-		var dtbi []byte
-		if opts.BuildInfo {
-			if dtbi, err = buildinfo.Format(exptypes.ParseKey(inp.Metadata, exptypes.ExporterBuildInfo, p), buildinfo.FormatOpts{
-				RemoveAttrs: !opts.BuildInfoAttrs,
-			}); err != nil {
-				return nil, nil, err
-			}
-		}
-
 		remote := &remotes[remotesMap[p.ID]]
 		if remote == nil {
 			remote = &solver.Remote{
@@ -231,7 +204,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 			}
 		}
 
-		committed, err := ic.commitDistributionManifest(ctx, opts, r, config, remote, opts.Annotations.Platform(&p.Platform), inlineCache, dtbi, opts.Epoch, session.NewGroup(sessionID))
+		committed, err := ic.commitDistributionManifest(ctx, opts, r, config, remote, opts.Annotations.Platform(&p.Platform), inlineCache, opts.Epoch, session.NewGroup(sessionID))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -268,7 +241,7 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 				if name == "" {
 					continue
 				}
-				pl, err := purl.RefToPURL(name, &p.Platform)
+				pl, err := purl.RefToPURL(packageurl.TypeDocker, name, &p.Platform)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -377,7 +350,7 @@ type Committed struct {
 	ConfigBytes []byte
 }
 
-func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *ImageCommitOpts, ref cache.ImmutableRef, config []byte, remote *solver.Remote, annotations *Annotations, inlineCache []byte, buildInfo []byte, epoch *time.Time, sg session.Group) (*Committed, error) {
+func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *ImageCommitOpts, ref cache.ImmutableRef, config []byte, remote *solver.Remote, annotations *Annotations, inlineCache []byte, epoch *time.Time, sg session.Group) (*Committed, error) {
 	if len(config) == 0 {
 		var err error
 		config, err = defaultImageConfig()
@@ -396,7 +369,7 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 		return nil, err
 	}
 
-	config, err = patchImageConfig(config, remote.Descriptors, history, inlineCache, buildInfo, epoch)
+	config, err = patchImageConfig(config, remote.Descriptors, history, inlineCache, epoch)
 	if err != nil {
 		return nil, err
 	}
@@ -413,24 +386,16 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 		configType = images.MediaTypeDockerSchema2Config
 	}
 
-	mfst := struct {
-		// MediaType is reserved in the OCI spec but
-		// excluded from go types.
-		MediaType string `json:"mediaType,omitempty"`
-
-		ocispecs.Manifest
-	}{
-		MediaType: manifestType,
-		Manifest: ocispecs.Manifest{
-			Annotations: annotations.Manifest,
-			Versioned: specs.Versioned{
-				SchemaVersion: 2,
-			},
-			Config: ocispecs.Descriptor{
-				Digest:    configDigest,
-				Size:      int64(len(config)),
-				MediaType: configType,
-			},
+	mfst := ocispecs.Manifest{
+		MediaType:   manifestType,
+		Annotations: annotations.Manifest,
+		Versioned: specs.Versioned{
+			SchemaVersion: 2,
+		},
+		Config: ocispecs.Descriptor{
+			Digest:    configDigest,
+			Size:      int64(len(config)),
+			MediaType: configType,
 		},
 	}
 
@@ -532,7 +497,7 @@ func (ic *ImageWriter) commitAttestationsManifest(ctx context.Context, opts *Ima
 		}
 		digest := digest.FromBytes(data)
 		desc := ocispecs.Descriptor{
-			MediaType: attestationTypes.MediaTypeDockerSchema2AttestationType,
+			MediaType: intoto.PayloadType,
 			Digest:    digest,
 			Size:      int64(len(data)),
 			Annotations: map[string]string{
@@ -558,23 +523,15 @@ func (ic *ImageWriter) commitAttestationsManifest(ctx context.Context, opts *Ima
 		MediaType: configType,
 	}
 
-	mfst := struct {
-		// MediaType is reserved in the OCI spec but
-		// excluded from go types.
-		MediaType string `json:"mediaType,omitempty"`
-
-		ocispecs.Manifest
-	}{
+	mfst := ocispecs.Manifest{
 		MediaType: manifestType,
-		Manifest: ocispecs.Manifest{
-			Versioned: specs.Versioned{
-				SchemaVersion: 2,
-			},
-			Config: ocispecs.Descriptor{
-				Digest:    configDigest,
-				Size:      int64(len(config)),
-				MediaType: configType,
-			},
+		Versioned: specs.Versioned{
+			SchemaVersion: 2,
+		},
+		Config: ocispecs.Descriptor{
+			Digest:    configDigest,
+			Size:      int64(len(config)),
+			MediaType: configType,
 		},
 	}
 
@@ -633,11 +590,10 @@ func (ic *ImageWriter) Applier() diff.Applier {
 func defaultImageConfig() ([]byte, error) {
 	pl := platforms.Normalize(platforms.DefaultSpec())
 
-	img := ocispecs.Image{
-		Architecture: pl.Architecture,
-		OS:           pl.OS,
-		Variant:      pl.Variant,
-	}
+	img := ocispecs.Image{}
+	img.Architecture = pl.Architecture
+	img.OS = pl.OS
+	img.Variant = pl.Variant
 	img.RootFS.Type = "layers"
 	img.Config.WorkingDir = "/"
 	img.Config.Env = []string{"PATH=" + system.DefaultPathEnv(pl.OS)}
@@ -646,13 +602,12 @@ func defaultImageConfig() ([]byte, error) {
 }
 
 func attestationsConfig(layers []ocispecs.Descriptor) ([]byte, error) {
-	img := ocispecs.Image{
-		Architecture: intotoPlatform.Architecture,
-		OS:           intotoPlatform.OS,
-		OSVersion:    intotoPlatform.OSVersion,
-		OSFeatures:   intotoPlatform.OSFeatures,
-		Variant:      intotoPlatform.Variant,
-	}
+	img := ocispecs.Image{}
+	img.Architecture = intotoPlatform.Architecture
+	img.OS = intotoPlatform.OS
+	img.OSVersion = intotoPlatform.OSVersion
+	img.OSFeatures = intotoPlatform.OSFeatures
+	img.Variant = intotoPlatform.Variant
 	img.RootFS.Type = "layers"
 	for _, layer := range layers {
 		img.RootFS.DiffIDs = append(img.RootFS.DiffIDs, digest.Digest(layer.Annotations["containerd.io/uncompressed"]))
@@ -671,7 +626,7 @@ func parseHistoryFromConfig(dt []byte) ([]ocispecs.History, error) {
 	return config.History, nil
 }
 
-func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs.History, cache []byte, buildInfo []byte, epoch *time.Time) ([]byte, error) {
+func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs.History, cache []byte, epoch *time.Time) ([]byte, error) {
 	m := map[string]json.RawMessage{}
 	if err := json.Unmarshal(dt, &m); err != nil {
 		return nil, errors.Wrap(err, "failed to parse image config for patch")
@@ -737,16 +692,6 @@ func patchImageConfig(dt []byte, descs []ocispecs.Descriptor, history []ocispecs
 			return nil, err
 		}
 		m["moby.buildkit.cache.v0"] = dt
-	}
-
-	if buildInfo != nil {
-		dt, err := json.Marshal(buildInfo)
-		if err != nil {
-			return nil, err
-		}
-		m[binfotypes.ImageConfigField] = dt
-	} else {
-		delete(m, binfotypes.ImageConfigField)
 	}
 
 	dt, err = json.Marshal(m)
@@ -835,7 +780,7 @@ func normalizeLayersAndHistory(ctx context.Context, remote *solver.Remote, histo
 	}
 
 	// convert between oci and docker media types (or vice versa) if needed
-	remote.Descriptors = compression.ConvertAllLayerMediaTypes(oci, remote.Descriptors...)
+	remote.Descriptors = compression.ConvertAllLayerMediaTypes(ctx, oci, remote.Descriptors...)
 
 	return remote, history
 }

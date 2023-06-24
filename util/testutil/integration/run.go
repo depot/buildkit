@@ -35,6 +35,7 @@ func init() {
 // Backend is the minimal interface that describes a testing backend.
 type Backend interface {
 	Address() string
+	DockerAddress() string
 	ContainerdAddress() string
 	Rootless() bool
 	Snapshotter() string
@@ -45,6 +46,7 @@ type Sandbox interface {
 
 	Context() context.Context
 	Cmd(...string) *exec.Cmd
+	Logs() map[string]*bytes.Buffer
 	PrintLogs(*testing.T)
 	ClearLogs()
 	NewRegistry() (string, error)
@@ -60,6 +62,7 @@ type BackendConfig struct {
 
 type Worker interface {
 	New(context.Context, *BackendConfig) (Backend, func() error, error)
+	Close() error
 	Name() string
 	Rootless() bool
 }
@@ -163,9 +166,14 @@ func Run(t *testing.T, testCases []Test, opt ...TestOpt) {
 
 	list := List()
 	if os.Getenv("BUILDKIT_WORKER_RANDOM") == "1" && len(list) > 0 {
-		rand.Seed(time.Now().UnixNano())
-		list = []Worker{list[rand.Intn(len(list))]} //nolint:gosec // using math/rand is fine in a test utility
+		rng := rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:gosec // using math/rand is fine in a test utility
+		list = []Worker{list[rng.Intn(len(list))]}
 	}
+	t.Cleanup(func() {
+		for _, br := range list {
+			_ = br.Close()
+		}
+	})
 
 	for _, br := range list {
 		for _, tc := range testCases {
@@ -319,6 +327,9 @@ func runMirror(t *testing.T, mirroredImages map[string]string) (host string, _ f
 
 	var lock *flock.Flock
 	if mirrorDir != "" {
+		if err := os.MkdirAll(mirrorDir, 0700); err != nil {
+			return "", nil, err
+		}
 		lock = flock.New(filepath.Join(mirrorDir, "lock"))
 		if err := lock.Lock(); err != nil {
 			return "", nil, err
@@ -444,7 +455,7 @@ func runStargzSnapshotter(cfg *BackendConfig) (address string, cl func() error, 
 	if err != nil {
 		return "", nil, err
 	}
-	if err = waitUnix(address, 10*time.Second); err != nil {
+	if err = waitUnix(address, 10*time.Second, cmd); err != nil {
 		snStop()
 		return "", nil, errors.Wrapf(err, "containerd-stargz-grpc did not start up: %s", formatLogs(cfg.Logs))
 	}

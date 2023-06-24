@@ -3,6 +3,7 @@ package client
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -14,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -34,6 +36,7 @@ import (
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/continuity/fs/fstest"
+	"github.com/docker/distribution/reference"
 	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client/llb"
@@ -49,12 +52,9 @@ import (
 	"github.com/moby/buildkit/solver/result"
 	"github.com/moby/buildkit/sourcepolicy"
 	sourcepolicypb "github.com/moby/buildkit/sourcepolicy/pb"
-	spb "github.com/moby/buildkit/sourcepolicy/pb"
 	"github.com/moby/buildkit/util/attestation"
-	binfotypes "github.com/moby/buildkit/util/buildinfo/types"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/entitlements"
-	"github.com/moby/buildkit/util/purl"
 	"github.com/moby/buildkit/util/testutil"
 	"github.com/moby/buildkit/util/testutil/echoserver"
 	"github.com/moby/buildkit/util/testutil/httpserver"
@@ -62,10 +62,11 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	spdx "github.com/spdx/tools-golang/spdx/v2_3"
+	"github.com/spdx/tools-golang/spdx"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 )
 
 func init() {
@@ -112,6 +113,8 @@ func TestIntegration(t *testing.T) {
 		testReadonlyRootFS,
 		testBasicRegistryCacheImportExport,
 		testBasicLocalCacheImportExport,
+		testBasicS3CacheImportExport,
+		testBasicAzblobCacheImportExport,
 		testCachedMounts,
 		testCopyFromEmptyImage,
 		testProxyEnv,
@@ -138,6 +141,7 @@ func TestIntegration(t *testing.T) {
 		testHostnameSpecifying,
 		testPushByDigest,
 		testBasicInlineCacheImportExport,
+		testBasicGhaCacheImportExport,
 		testExportBusyboxLocal,
 		testBridgeNetworking,
 		testCacheMountNoCache,
@@ -165,9 +169,6 @@ func TestIntegration(t *testing.T) {
 		testRmSymlink,
 		testMoveParentDir,
 		testBuildExportWithForeignLayer,
-		testBuildInfoExporter,
-		testBuildInfoInline,
-		testBuildInfoNoExport,
 		testZstdLocalCacheExport,
 		testCacheExportIgnoreError,
 		testZstdRegistryCacheImportExport,
@@ -195,7 +196,10 @@ func TestIntegration(t *testing.T) {
 		testMountStubsDirectory,
 		testMountStubsTimestamp,
 		testSourcePolicy,
+		testImageManifestRegistryCacheImportExport,
 		testLLBMountPerformance,
+		testClientCustomGRPCOpts,
+		testMultipleRecordsWithSameLayersCacheImportExport,
 	)
 }
 
@@ -2188,6 +2192,56 @@ func testBuildHTTPSource(t *testing.T, sb integration.Sandbox) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("content1"), dt)
 
+	allReqs := server.Stats("/foo").Requests
+	require.Equal(t, 2, len(allReqs))
+	require.Equal(t, http.MethodGet, allReqs[0].Method)
+	require.Equal(t, "gzip", allReqs[0].Header.Get("Accept-Encoding"))
+	require.Equal(t, http.MethodHead, allReqs[1].Method)
+	require.Equal(t, "gzip", allReqs[1].Header.Get("Accept-Encoding"))
+
+	require.NoError(t, os.RemoveAll(filepath.Join(tmpdir, "foo")))
+
+	// update the content at the url to be gzipped now, the final output
+	// should remain the same
+	modTime = time.Now().Add(-23 * time.Hour)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err = gw.Write(resp.Content)
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+	gzipBytes := buf.Bytes()
+	respGzip := httpserver.Response{
+		Etag:            identity.NewID(),
+		Content:         gzipBytes,
+		LastModified:    &modTime,
+		ContentEncoding: "gzip",
+	}
+	server.SetRoute("/foo", respGzip)
+
+	_, err = c.Solve(sb.Context(), def, SolveOpt{
+		Exports: []ExportEntry{
+			{
+				Type:      ExporterLocal,
+				OutputDir: tmpdir,
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, server.Stats("/foo").AllRequests, 4)
+	require.Equal(t, server.Stats("/foo").CachedRequests, 1)
+
+	dt, err = os.ReadFile(filepath.Join(tmpdir, "foo"))
+	require.NoError(t, err)
+	require.Equal(t, resp.Content, dt)
+
+	allReqs = server.Stats("/foo").Requests
+	require.Equal(t, 4, len(allReqs))
+	require.Equal(t, http.MethodHead, allReqs[2].Method)
+	require.Equal(t, "gzip", allReqs[2].Header.Get("Accept-Encoding"))
+	require.Equal(t, http.MethodGet, allReqs[3].Method)
+	require.Equal(t, "gzip", allReqs[3].Header.Get("Accept-Encoding"))
+
 	// test extra options
 	st = llb.HTTP(server.URL+"/foo", llb.Filename("bar"), llb.Chmod(0741), llb.Chown(1000, 1000))
 
@@ -2204,7 +2258,7 @@ func testBuildHTTPSource(t *testing.T, sb integration.Sandbox) {
 	}, nil)
 	require.NoError(t, err)
 
-	require.Equal(t, server.Stats("/foo").AllRequests, 3)
+	require.Equal(t, server.Stats("/foo").AllRequests, 5)
 	require.Equal(t, server.Stats("/foo").CachedRequests, 1)
 
 	dt, err = os.ReadFile(filepath.Join(tmpdir, "bar"))
@@ -3819,11 +3873,11 @@ func testStargzLazyRegistryCacheImportExport(t *testing.T, sb integration.Sandbo
 
 	// stargz layers should be lazy even for executing something on them
 	def, err = baseDef.
-		Run(llb.Args([]string{"/bin/touch", "/bar"})).
+		Run(llb.Args([]string{"sh", "-c", "cat /dev/urandom | head -c 100 | sha256sum > unique"})).
 		Marshal(sb.Context())
 	require.NoError(t, err)
 	target := registry + "/buildkit/testlazyimage:" + identity.NewID()
-	_, err = c.Solve(sb.Context(), def, SolveOpt{
+	resp, err := c.Solve(sb.Context(), def, SolveOpt{
 		Exports: []ExportEntry{
 			{
 				Type: ExporterImage,
@@ -3831,6 +3885,7 @@ func testStargzLazyRegistryCacheImportExport(t *testing.T, sb integration.Sandbo
 					"name":                                   target,
 					"push":                                   "true",
 					"store":                                  "true",
+					"oci-mediatypes":                         "true",
 					"unsafe-internal-store-allow-incomplete": "true",
 				},
 			},
@@ -3843,7 +3898,23 @@ func testStargzLazyRegistryCacheImportExport(t *testing.T, sb integration.Sandbo
 				},
 			},
 		},
+		CacheExports: []CacheOptionsEntry{
+			{
+				Type: "registry",
+				Attrs: map[string]string{
+					"ref":            sgzCache,
+					"compression":    "estargz",
+					"oci-mediatypes": "true",
+				},
+			},
+		},
 	}, nil)
+	require.NoError(t, err)
+
+	dgst, ok := resp.ExporterResponse[exptypes.ExporterImageDigestKey]
+	require.Equal(t, ok, true)
+
+	unique, err := readFileInImage(sb.Context(), t, c, target+"@"+dgst, "/unique")
 	require.NoError(t, err)
 
 	img, err := imageService.Get(ctx, target)
@@ -3865,6 +3936,40 @@ func testStargzLazyRegistryCacheImportExport(t *testing.T, sb integration.Sandbo
 	// The topmost(last) layer created by `Run` shouldn't be lazy
 	_, err = contentStore.Info(ctx, manifest.Layers[len(manifest.Layers)-1].Digest)
 	require.NoError(t, err)
+
+	// Run build again and check if cache is reused
+	resp, err = c.Solve(sb.Context(), def, SolveOpt{
+		Exports: []ExportEntry{
+			{
+				Type: ExporterImage,
+				Attrs: map[string]string{
+					"name":                                   target,
+					"push":                                   "true",
+					"store":                                  "true",
+					"oci-mediatypes":                         "true",
+					"unsafe-internal-store-allow-incomplete": "true",
+				},
+			},
+		},
+		CacheImports: []CacheOptionsEntry{
+			{
+				Type: "registry",
+				Attrs: map[string]string{
+					"ref": sgzCache,
+				},
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	dgst2, ok := resp.ExporterResponse[exptypes.ExporterImageDigestKey]
+	require.Equal(t, ok, true)
+
+	unique2, err := readFileInImage(sb.Context(), t, c, target+"@"+dgst2, "/unique")
+	require.NoError(t, err)
+
+	require.Equal(t, dgst, dgst2)
+	require.EqualValues(t, unique, unique2)
 
 	// clear all local state out
 	err = imageService.Delete(ctx, img.Name, images.SynchronousDelete())
@@ -4114,11 +4219,11 @@ func testStargzLazyPull(t *testing.T, sb integration.Sandbox) {
 
 	// stargz layers should be lazy even for executing something on them
 	def, err = llb.Image(sgzImage).
-		Run(llb.Args([]string{"/bin/touch", "/foo"})).
+		Run(llb.Args([]string{"sh", "-c", "cat /dev/urandom | head -c 100 | sha256sum > unique"})).
 		Marshal(sb.Context())
 	require.NoError(t, err)
 	target := registry + "/buildkit/testlazyimage:" + identity.NewID()
-	_, err = c.Solve(sb.Context(), def, SolveOpt{
+	resp, err := c.Solve(sb.Context(), def, SolveOpt{
 		Exports: []ExportEntry{
 			{
 				Type: ExporterImage,
@@ -4132,6 +4237,12 @@ func testStargzLazyPull(t *testing.T, sb integration.Sandbox) {
 			},
 		},
 	}, nil)
+	require.NoError(t, err)
+
+	dgst, ok := resp.ExporterResponse[exptypes.ExporterImageDigestKey]
+	require.Equal(t, ok, true)
+
+	unique, err := readFileInImage(sb.Context(), t, c, target+"@"+dgst, "/unique")
 	require.NoError(t, err)
 
 	img, err := imageService.Get(ctx, target)
@@ -4153,6 +4264,32 @@ func testStargzLazyPull(t *testing.T, sb integration.Sandbox) {
 	// The topmost(last) layer created by `Run` shouldn't be lazy
 	_, err = contentStore.Info(ctx, manifest.Layers[len(manifest.Layers)-1].Digest)
 	require.NoError(t, err)
+
+	// Run build again and check if cache is reused
+	resp, err = c.Solve(sb.Context(), def, SolveOpt{
+		Exports: []ExportEntry{
+			{
+				Type: ExporterImage,
+				Attrs: map[string]string{
+					"name":                                   target,
+					"push":                                   "true",
+					"store":                                  "true",
+					"oci-mediatypes":                         "true",
+					"unsafe-internal-store-allow-incomplete": "true",
+				},
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	dgst2, ok := resp.ExporterResponse[exptypes.ExporterImageDigestKey]
+	require.Equal(t, ok, true)
+
+	unique2, err := readFileInImage(sb.Context(), t, c, target+"@"+dgst2, "/unique")
+	require.NoError(t, err)
+
+	require.Equal(t, dgst, dgst2)
+	require.EqualValues(t, unique, unique2)
 
 	// clear all local state out
 	err = imageService.Delete(ctx, img.Name, images.SynchronousDelete())
@@ -4575,6 +4712,36 @@ func testZstdLocalCacheImportExport(t *testing.T, sb integration.Sandbox) {
 	testBasicCacheImportExport(t, sb, []CacheOptionsEntry{im}, []CacheOptionsEntry{ex})
 }
 
+func testImageManifestRegistryCacheImportExport(t *testing.T, sb integration.Sandbox) {
+	integration.CheckFeatureCompat(t, sb,
+		integration.FeatureCacheExport,
+		integration.FeatureCacheImport,
+		integration.FeatureCacheBackendRegistry,
+	)
+	registry, err := sb.NewRegistry()
+	if errors.Is(err, integration.ErrRequirements) {
+		t.Skip(err.Error())
+	}
+	require.NoError(t, err)
+	target := registry + "/buildkit/testexport:latest"
+	im := CacheOptionsEntry{
+		Type: "registry",
+		Attrs: map[string]string{
+			"ref": target,
+		},
+	}
+	ex := CacheOptionsEntry{
+		Type: "registry",
+		Attrs: map[string]string{
+			"ref":            target,
+			"image-manifest": "true",
+			"oci-mediatypes": "true",
+			"mode":           "max",
+		},
+	}
+	testBasicCacheImportExport(t, sb, []CacheOptionsEntry{im}, []CacheOptionsEntry{ex})
+}
+
 func testZstdRegistryCacheImportExport(t *testing.T, sb integration.Sandbox) {
 	integration.CheckFeatureCompat(t, sb,
 		integration.FeatureCacheExport,
@@ -4732,6 +4899,85 @@ func testBasicLocalCacheImportExport(t *testing.T, sb integration.Sandbox) {
 		Type: "local",
 		Attrs: map[string]string{
 			"dest": dir,
+		},
+	}
+	testBasicCacheImportExport(t, sb, []CacheOptionsEntry{im}, []CacheOptionsEntry{ex})
+}
+
+func testBasicS3CacheImportExport(t *testing.T, sb integration.Sandbox) {
+	integration.CheckFeatureCompat(t, sb,
+		integration.FeatureCacheExport,
+		integration.FeatureCacheImport,
+		integration.FeatureCacheBackendS3,
+	)
+
+	opts := integration.MinioOpts{
+		Region:          "us-east-1",
+		AccessKeyID:     "minioadmin",
+		SecretAccessKey: "minioadmin",
+	}
+
+	s3Addr, s3Bucket, cleanup, err := integration.NewMinioServer(t, sb, opts)
+	require.NoError(t, err)
+	defer cleanup()
+
+	im := CacheOptionsEntry{
+		Type: "s3",
+		Attrs: map[string]string{
+			"region":            opts.Region,
+			"access_key_id":     opts.AccessKeyID,
+			"secret_access_key": opts.SecretAccessKey,
+			"bucket":            s3Bucket,
+			"endpoint_url":      s3Addr,
+			"use_path_style":    "true",
+		},
+	}
+	ex := CacheOptionsEntry{
+		Type: "s3",
+		Attrs: map[string]string{
+			"region":            opts.Region,
+			"access_key_id":     opts.AccessKeyID,
+			"secret_access_key": opts.SecretAccessKey,
+			"bucket":            s3Bucket,
+			"endpoint_url":      s3Addr,
+			"use_path_style":    "true",
+		},
+	}
+	testBasicCacheImportExport(t, sb, []CacheOptionsEntry{im}, []CacheOptionsEntry{ex})
+}
+
+func testBasicAzblobCacheImportExport(t *testing.T, sb integration.Sandbox) {
+	integration.CheckFeatureCompat(t, sb,
+		integration.FeatureCacheExport,
+		integration.FeatureCacheImport,
+		integration.FeatureCacheBackendAzblob,
+	)
+
+	opts := integration.AzuriteOpts{
+		AccountName: "azblobcacheaccount",
+		AccountKey:  base64.StdEncoding.EncodeToString([]byte("azblobcacheaccountkey")),
+	}
+
+	azAddr, cleanup, err := integration.NewAzuriteServer(t, sb, opts)
+	require.NoError(t, err)
+	defer cleanup()
+
+	im := CacheOptionsEntry{
+		Type: "azblob",
+		Attrs: map[string]string{
+			"account_url":       azAddr,
+			"account_name":      opts.AccountName,
+			"secret_access_key": opts.AccountKey,
+			"container":         "cachecontainer",
+		},
+	}
+	ex := CacheOptionsEntry{
+		Type: "azblob",
+		Attrs: map[string]string{
+			"account_url":       azAddr,
+			"account_name":      opts.AccountName,
+			"secret_access_key": opts.AccountKey,
+			"container":         "cachecontainer",
 		},
 	}
 	testBasicCacheImportExport(t, sb, []CacheOptionsEntry{im}, []CacheOptionsEntry{ex})
@@ -4900,6 +5146,107 @@ func testBasicInlineCacheImportExport(t *testing.T, sb integration.Sandbox) {
 	unique3, err := readFileInImage(sb.Context(), t, c, target+"@"+dgst3, "/unique")
 	require.NoError(t, err)
 	require.EqualValues(t, unique, unique3)
+}
+
+func testBasicGhaCacheImportExport(t *testing.T, sb integration.Sandbox) {
+	integration.CheckFeatureCompat(t, sb,
+		integration.FeatureCacheExport,
+		integration.FeatureCacheImport,
+		integration.FeatureCacheBackendGha,
+	)
+	runtimeToken := os.Getenv("ACTIONS_RUNTIME_TOKEN")
+	cacheURL := os.Getenv("ACTIONS_CACHE_URL")
+	if runtimeToken == "" || cacheURL == "" {
+		t.Skip("ACTIONS_RUNTIME_TOKEN and ACTIONS_CACHE_URL must be set")
+	}
+
+	scope := "buildkit-" + t.Name()
+	if ref := os.Getenv("GITHUB_REF"); ref != "" {
+		if strings.HasPrefix(ref, "refs/heads/") {
+			scope += "-" + strings.TrimPrefix(ref, "refs/heads/")
+		} else if strings.HasPrefix(ref, "refs/tags/") {
+			scope += "-" + strings.TrimPrefix(ref, "refs/tags/")
+		} else if strings.HasPrefix(ref, "refs/pull/") {
+			scope += "-pr" + strings.TrimPrefix(strings.TrimSuffix(strings.TrimSuffix(ref, "/head"), "/merge"), "refs/pull/")
+		}
+	}
+
+	im := CacheOptionsEntry{
+		Type: "gha",
+		Attrs: map[string]string{
+			"url":   cacheURL,
+			"token": runtimeToken,
+			"scope": scope,
+		},
+	}
+	ex := CacheOptionsEntry{
+		Type: "gha",
+		Attrs: map[string]string{
+			"url":   cacheURL,
+			"token": runtimeToken,
+			"scope": scope,
+			"mode":  "max",
+		},
+	}
+	testBasicCacheImportExport(t, sb, []CacheOptionsEntry{im}, []CacheOptionsEntry{ex})
+}
+
+func testMultipleRecordsWithSameLayersCacheImportExport(t *testing.T, sb integration.Sandbox) {
+	integration.CheckFeatureCompat(t, sb,
+		integration.FeatureCacheExport,
+		integration.FeatureCacheImport,
+		integration.FeatureCacheBackendRegistry,
+	)
+	registry, err := sb.NewRegistry()
+	if errors.Is(err, integration.ErrRequirements) {
+		t.Skip(err.Error())
+	}
+	require.NoError(t, err)
+	target := registry + "/buildkit/testexport:latest"
+	cacheOpts := []CacheOptionsEntry{{
+		Type: "registry",
+		Attrs: map[string]string{
+			"ref": target,
+		},
+	}}
+
+	requiresLinux(t)
+	c, err := New(sb.Context(), sb.Address())
+	require.NoError(t, err)
+	defer c.Close()
+
+	base := llb.Image("busybox:latest")
+	// layerA and layerB create identical layers with different LLB
+	layerA := base.Run(llb.Args([]string{"sh", "-c",
+		`echo $(( 1 + 2 )) > /result && touch -d "1970-01-01 00:00:00" /result`,
+	})).Root()
+	layerB := base.Run(llb.Args([]string{"sh", "-c",
+		`echo $(( 2 + 1 )) > /result && touch -d "1970-01-01 00:00:00" /result`,
+	})).Root()
+
+	combined := llb.Merge([]llb.State{layerA, layerB})
+	combinedDef, err := combined.Marshal(sb.Context())
+	require.NoError(t, err)
+
+	_, err = c.Solve(sb.Context(), combinedDef, SolveOpt{
+		CacheExports: cacheOpts,
+	}, nil)
+	require.NoError(t, err)
+
+	ensurePruneAll(t, c, sb)
+
+	singleDef, err := layerA.Marshal(sb.Context())
+	require.NoError(t, err)
+
+	_, err = c.Solve(sb.Context(), singleDef, SolveOpt{
+		CacheImports: cacheOpts,
+	}, nil)
+	require.NoError(t, err)
+
+	// Ensure that even though layerA and layerB were both loaded as possible results
+	// and only was used, all the cache refs are released
+	// More context: https://github.com/moby/buildkit/pull/3815
+	ensurePruneAll(t, c, sb)
 }
 
 func readFileInImage(ctx context.Context, t *testing.T, c *Client, ref, path string) ([]byte, error) {
@@ -5459,8 +5806,8 @@ func testSourceMap(t *testing.T, sb integration.Sandbox) {
 	require.NoError(t, err)
 	defer c.Close()
 
-	sm1 := llb.NewSourceMap(nil, "foo", []byte("data1"))
-	sm2 := llb.NewSourceMap(nil, "bar", []byte("data2"))
+	sm1 := llb.NewSourceMap(nil, "foo", "", []byte("data1"))
+	sm2 := llb.NewSourceMap(nil, "bar", "", []byte("data2"))
 
 	st := llb.Scratch().Run(
 		llb.Shlex("not-exist"),
@@ -5514,7 +5861,7 @@ func testSourceMapFromRef(t *testing.T, sb integration.Sandbox) {
 
 	srcState := llb.Scratch().File(
 		llb.Mkfile("foo", 0600, []byte("data")))
-	sm := llb.NewSourceMap(&srcState, "bar", []byte("bardata"))
+	sm := llb.NewSourceMap(&srcState, "bar", "mylang", []byte("bardata"))
 
 	frontend := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
 		st := llb.Scratch().File(
@@ -5565,6 +5912,7 @@ func testSourceMapFromRef(t *testing.T, sb integration.Sandbox) {
 	require.Equal(t, 1, len(srcs))
 
 	require.Equal(t, "bar", srcs[0].Info.Filename)
+	require.Equal(t, "mylang", srcs[0].Info.Language)
 	require.Equal(t, []byte("bardata"), srcs[0].Info.Data)
 	require.NotNil(t, srcs[0].Info.Definition)
 
@@ -6333,7 +6681,8 @@ loop0:
 	defer client.Close()
 
 	ctx := namespaces.WithNamespace(sb.Context(), "buildkit")
-	snapshotService := client.SnapshotService("overlayfs")
+	snapshotterName := sb.Snapshotter()
+	snapshotService := client.SnapshotService(snapshotterName)
 
 	retries = 0
 	for {
@@ -6530,164 +6879,6 @@ func testRelativeMountpoint(t *testing.T, sb integration.Sandbox) {
 	dt, err := os.ReadFile(filepath.Join(destDir, "data"))
 	require.NoError(t, err)
 	require.Equal(t, dt, []byte(id))
-}
-
-// moby/buildkit#2476
-func testBuildInfoExporter(t *testing.T, sb integration.Sandbox) {
-	requiresLinux(t)
-	c, err := New(sb.Context(), sb.Address())
-	require.NoError(t, err)
-	defer c.Close()
-
-	frontend := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
-		st := llb.Image("busybox:latest").Run(
-			llb.Args([]string{"/bin/sh", "-c", `echo hello`}),
-		)
-		def, err := st.Marshal(sb.Context())
-		if err != nil {
-			return nil, err
-		}
-		return c.Solve(ctx, gateway.SolveRequest{
-			Definition: def.ToPB(),
-		})
-	}
-
-	var exports []ExportEntry
-	if integration.IsTestDockerdMoby(sb) {
-		exports = []ExportEntry{{
-			Type: "moby",
-			Attrs: map[string]string{
-				"name": "reg.dummy:5000/buildkit/test:latest",
-			},
-		}}
-	} else {
-		exports = []ExportEntry{{
-			Type:   ExporterOCI,
-			Attrs:  map[string]string{},
-			Output: fixedWriteCloser(nopWriteCloser{io.Discard}),
-		}}
-	}
-
-	res, err := c.Build(sb.Context(), SolveOpt{
-		Exports: exports,
-	}, "", frontend, nil)
-	require.NoError(t, err)
-
-	require.Contains(t, res.ExporterResponse, exptypes.ExporterBuildInfo)
-	decbi, err := base64.StdEncoding.DecodeString(res.ExporterResponse[exptypes.ExporterBuildInfo])
-	require.NoError(t, err)
-
-	var exbi binfotypes.BuildInfo
-	err = json.Unmarshal(decbi, &exbi)
-	require.NoError(t, err)
-
-	require.Equal(t, len(exbi.Sources), 1)
-	require.Equal(t, exbi.Sources[0].Type, binfotypes.SourceTypeDockerImage)
-	require.Equal(t, exbi.Sources[0].Ref, "docker.io/library/busybox:latest")
-}
-
-// moby/buildkit#2476
-func testBuildInfoInline(t *testing.T, sb integration.Sandbox) {
-	integration.CheckFeatureCompat(t, sb, integration.FeatureDirectPush)
-	requiresLinux(t)
-	c, err := New(sb.Context(), sb.Address())
-	require.NoError(t, err)
-	defer c.Close()
-
-	st := llb.Image("busybox:latest").Run(
-		llb.Args([]string{"/bin/sh", "-c", `echo hello`}),
-	)
-	def, err := st.Marshal(sb.Context())
-	require.NoError(t, err)
-
-	registry, err := sb.NewRegistry()
-	if errors.Is(err, integration.ErrRequirements) {
-		t.Skip(err.Error())
-	}
-	require.NoError(t, err)
-
-	cdAddress := sb.ContainerdAddress()
-	if cdAddress == "" {
-		t.Skip("rest of test requires containerd worker")
-	}
-
-	client, err := newContainerd(cdAddress)
-	require.NoError(t, err)
-	defer client.Close()
-
-	ctx := namespaces.WithNamespace(sb.Context(), "buildkit")
-
-	target := registry + "/buildkit/test-buildinfo:latest"
-
-	_, err = c.Solve(sb.Context(), def, SolveOpt{
-		Exports: []ExportEntry{
-			{
-				Type: ExporterImage,
-				Attrs: map[string]string{
-					"name": target,
-					"push": "true",
-				},
-			},
-		},
-	}, nil)
-	require.NoError(t, err)
-
-	img, err := client.GetImage(ctx, target)
-	require.NoError(t, err)
-
-	desc, err := img.Config(ctx)
-	require.NoError(t, err)
-
-	dt, err := content.ReadBlob(ctx, img.ContentStore(), desc)
-	require.NoError(t, err)
-
-	var config binfotypes.ImageConfig
-	require.NoError(t, json.Unmarshal(dt, &config))
-
-	dec, err := base64.StdEncoding.DecodeString(config.BuildInfo)
-	require.NoError(t, err)
-
-	var bi binfotypes.BuildInfo
-	require.NoError(t, json.Unmarshal(dec, &bi))
-
-	require.Equal(t, len(bi.Sources), 1)
-	require.Equal(t, bi.Sources[0].Type, binfotypes.SourceTypeDockerImage)
-	require.Equal(t, bi.Sources[0].Ref, "docker.io/library/busybox:latest")
-}
-
-func testBuildInfoNoExport(t *testing.T, sb integration.Sandbox) {
-	requiresLinux(t)
-	c, err := New(sb.Context(), sb.Address())
-	require.NoError(t, err)
-	defer c.Close()
-
-	frontend := func(ctx context.Context, c gateway.Client) (*gateway.Result, error) {
-		st := llb.Image("busybox:latest").Run(
-			llb.Args([]string{"/bin/sh", "-c", `echo hello`}),
-		)
-		def, err := st.Marshal(sb.Context())
-		if err != nil {
-			return nil, err
-		}
-		return c.Solve(ctx, gateway.SolveRequest{
-			Definition: def.ToPB(),
-		})
-	}
-
-	res, err := c.Build(sb.Context(), SolveOpt{}, "", frontend, nil)
-	require.NoError(t, err)
-
-	require.Contains(t, res.ExporterResponse, exptypes.ExporterBuildInfo)
-	decbi, err := base64.StdEncoding.DecodeString(res.ExporterResponse[exptypes.ExporterBuildInfo])
-	require.NoError(t, err)
-
-	var exbi binfotypes.BuildInfo
-	err = json.Unmarshal(decbi, &exbi)
-	require.NoError(t, err)
-
-	require.Equal(t, len(exbi.Sources), 1)
-	require.Equal(t, exbi.Sources[0].Type, binfotypes.SourceTypeDockerImage)
-	require.Equal(t, exbi.Sources[0].Ref, "docker.io/library/busybox:latest")
 }
 
 func testPullWithLayerLimit(t *testing.T, sb integration.Sandbox) {
@@ -7374,7 +7565,14 @@ func testExportAttestations(t *testing.T, sb integration.Sandbox) {
 
 			purls := map[string]string{}
 			for _, k := range targets {
-				p, _ := purl.RefToPURL(k, &ps[i])
+				named, err := reference.ParseNormalizedNamed(k)
+				require.NoError(t, err)
+				name := reference.FamiliarName(named)
+				version := ""
+				if tagged, ok := named.(reference.Tagged); ok {
+					version = tagged.Tag()
+				}
+				p := fmt.Sprintf("pkg:docker/%s%s@%s?platform=%s", url.QueryEscape(registry), strings.TrimPrefix(name, registry), version, url.PathEscape(platforms.Format(ps[i])))
 				purls[k] = p
 			}
 
@@ -7503,8 +7701,9 @@ func testExportAttestations(t *testing.T, sb integration.Sandbox) {
 
 		for _, p := range ps {
 			var attest intoto.Statement
-			dt := m[path.Join(strings.ReplaceAll(platforms.Format(p), "/", "_"), "test.attestation.json")].Data
-			require.NoError(t, json.Unmarshal(dt, &attest))
+			item := m[path.Join(strings.ReplaceAll(platforms.Format(p), "/", "_"), "test.attestation.json")]
+			require.NotNil(t, item)
+			require.NoError(t, json.Unmarshal(item.Data, &attest))
 
 			require.Equal(t, "https://in-toto.io/Statement/v0.1", attest.Type)
 			require.Equal(t, "https://example.com/attestations/v1.0", attest.PredicateType)
@@ -7516,8 +7715,9 @@ func testExportAttestations(t *testing.T, sb integration.Sandbox) {
 			}}, attest.Subject)
 
 			var attest2 intoto.Statement
-			dt = m[path.Join(strings.ReplaceAll(platforms.Format(p), "/", "_"), "test.attestation2.json")].Data
-			require.NoError(t, json.Unmarshal(dt, &attest2))
+			item = m[path.Join(strings.ReplaceAll(platforms.Format(p), "/", "_"), "test.attestation2.json")]
+			require.NotNil(t, item)
+			require.NoError(t, json.Unmarshal(item.Data, &attest2))
 
 			require.Equal(t, "https://in-toto.io/Statement/v0.1", attest2.Type)
 			require.Equal(t, "https://example.com/attestations2/v1.0", attest2.PredicateType)
@@ -7660,8 +7860,7 @@ func testAttestationDefaultSubject(t *testing.T, sb integration.Sandbox) {
 		require.Equal(t, "https://example.com/attestations/v1.0", attest.PredicateType)
 		require.Equal(t, map[string]interface{}{"success": true}, attest.Predicate)
 
-		name, _ := purl.RefToPURL(target, &ps[0])
-
+		name := fmt.Sprintf("pkg:docker/%s/buildkit/testattestationsemptysubject@latest?platform=%s", url.QueryEscape(registry), url.QueryEscape(platforms.Format(ps[i])))
 		subjects := []intoto.Subject{{
 			Name: name,
 			Digest: map[string]string{
@@ -7812,7 +8011,7 @@ func testAttestationBundle(t *testing.T, sb integration.Sandbox) {
 
 		require.Equal(t, "https://example.com/attestations/v1.0", attest.PredicateType)
 		require.Equal(t, map[string]interface{}{"foo": "1"}, attest.Predicate)
-		name, _ := purl.RefToPURL(target, &ps[i])
+		name := fmt.Sprintf("pkg:docker/%s/buildkit/testattestationsbundle@latest?platform=%s", url.QueryEscape(registry), url.QueryEscape(platforms.Format(ps[i])))
 		subjects := []intoto.Subject{{
 			Name: name,
 			Digest: map[string]string{
@@ -8321,6 +8520,7 @@ func testSBOMSupplements(t *testing.T, sb integration.Sandbox) {
 
 		// build attestations
 		doc := spdx.Document{
+			SPDXVersion:    "SPDX-2.2",
 			SPDXIdentifier: "DOCUMENT",
 			Files: []*spdx.File{
 				{
@@ -8929,11 +9129,11 @@ func testSourcePolicy(t *testing.T, sb integration.Sandbox) {
 			}
 			return c.Solve(ctx, gateway.SolveRequest{
 				Definition: def.ToPB(),
-				SourcePolicies: []*spb.Policy{{
-					Rules: []*spb.Rule{
+				SourcePolicies: []*sourcepolicypb.Policy{{
+					Rules: []*sourcepolicypb.Rule{
 						{
-							Action: spb.PolicyAction_DENY,
-							Selector: &spb.Selector{
+							Action: sourcepolicypb.PolicyAction_DENY,
+							Selector: &sourcepolicypb.Selector{
 								Identifier: denied,
 							},
 						},
@@ -8973,4 +9173,23 @@ func testLLBMountPerformance(t *testing.T, sb integration.Sandbox) {
 	defer cancel()
 	_, err = c.Solve(timeoutCtx, def, SolveOpt{}, nil)
 	require.NoError(t, err)
+}
+
+func testClientCustomGRPCOpts(t *testing.T, sb integration.Sandbox) {
+	var interceptedMethods []string
+	intercept := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		interceptedMethods = append(interceptedMethods, method)
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+	c, err := New(sb.Context(), sb.Address(), WithGRPCDialOption(grpc.WithChainUnaryInterceptor(intercept)))
+	require.NoError(t, err)
+	defer c.Close()
+
+	st := llb.Image("busybox:latest")
+	def, err := st.Marshal(sb.Context())
+	require.NoError(t, err)
+	_, err = c.Solve(sb.Context(), def, SolveOpt{}, nil)
+	require.NoError(t, err)
+
+	require.Contains(t, interceptedMethods, "/moby.buildkit.v1.Control/Solve")
 }

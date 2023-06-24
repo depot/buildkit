@@ -14,7 +14,6 @@ import (
 	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/services/content/contentserver"
 	"github.com/docker/distribution/reference"
-	"github.com/gogo/protobuf/types"
 	"github.com/mitchellh/hashstructure/v2"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	apitypes "github.com/moby/buildkit/api/types"
@@ -23,17 +22,20 @@ import (
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	controlgateway "github.com/moby/buildkit/control/gateway"
 	"github.com/moby/buildkit/exporter"
+	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/exporter/util/epoch"
 	"github.com/moby/buildkit/frontend"
 	"github.com/moby/buildkit/frontend/attestations"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/grpchijack"
+	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver"
 	"github.com/moby/buildkit/solver/llbsolver/proc"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/imageutil"
+	"github.com/moby/buildkit/util/leaseutil"
 	"github.com/moby/buildkit/util/throttle"
 	"github.com/moby/buildkit/util/tracing/transform"
 	"github.com/moby/buildkit/version"
@@ -48,20 +50,21 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type Opt struct {
 	SessionManager            *session.Manager
 	WorkerController          *worker.Controller
 	Frontends                 map[string]frontend.Frontend
-	CacheKeyStorage           solver.CacheKeyStorage
+	CacheManager              solver.CacheManager
 	ResolveCacheExporterFuncs map[string]remotecache.ResolveCacheExporterFunc
 	ResolveCacheImporterFuncs map[string]remotecache.ResolveCacheImporterFunc
 	Entitlements              []string
 	TraceCollector            sdktrace.SpanExporter
 	HistoryDB                 *bbolt.DB
-	LeaseManager              leases.Manager
-	ContentStore              content.Store
+	LeaseManager              *leaseutil.Manager
+	ContentStore              *containerdsnapshot.Store
 	HistoryConfig             *config.HistoryConfig
 }
 
@@ -79,21 +82,22 @@ type Controller struct { // TODO: ControlService
 }
 
 func NewController(opt Opt) (*Controller, error) {
-	cache := solver.NewCacheManager(context.TODO(), "local", opt.CacheKeyStorage, worker.NewCacheResultStorage(opt.WorkerController))
-
 	gatewayForwarder := controlgateway.NewGatewayForwarder()
 
-	hq := llbsolver.NewHistoryQueue(llbsolver.HistoryQueueOpt{
+	hq, err := llbsolver.NewHistoryQueue(llbsolver.HistoryQueueOpt{
 		DB:           opt.HistoryDB,
 		LeaseManager: opt.LeaseManager,
 		ContentStore: opt.ContentStore,
 		CleanConfig:  opt.HistoryConfig,
 	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create history queue")
+	}
 
 	s, err := llbsolver.New(llbsolver.Opt{
 		WorkerController: opt.WorkerController,
 		Frontends:        opt.Frontends,
-		CacheManager:     cache,
+		CacheManager:     opt.CacheManager,
 		CacheResolvers:   opt.ResolveCacheImporterFuncs,
 		GatewayForwarder: gatewayForwarder,
 		SessionManager:   opt.SessionManager,
@@ -108,7 +112,7 @@ func NewController(opt Opt) (*Controller, error) {
 		opt:              opt,
 		solver:           s,
 		history:          hq,
-		cache:            cache,
+		cache:            opt.CacheManager,
 		gatewayForwarder: gatewayForwarder,
 	}
 	c.throttledGC = throttle.After(time.Minute, c.gc)
@@ -129,22 +133,23 @@ func (c *Controller) Register(server *grpc.Server) {
 	c.gatewayForwarder.Register(server)
 	tracev1.RegisterTraceServiceServer(server, c)
 
-	store := &roContentStore{c.opt.ContentStore}
+	store := &roContentStore{c.opt.ContentStore.WithFallbackNS(c.opt.ContentStore.Namespace() + "_history")}
 	contentapi.RegisterContentServer(server, contentserver.New(store))
-	leasesapi.RegisterLeasesServer(server, &LeaseManager{c.opt.LeaseManager})
+	leasesapi.RegisterLeasesServer(server, &LeaseManager{c.opt.LeaseManager, leasesapi.UnimplementedLeasesServer{}})
 }
 
 // DEPOT: This lease manager is used by the CLI to remove image leases after load.
 type LeaseManager struct {
 	manager leases.Manager
+	leasesapi.UnimplementedLeasesServer
 }
 
-func (m *LeaseManager) Delete(ctx context.Context, req *leasesapi.DeleteRequest) (*types.Empty, error) {
+func (m *LeaseManager) Delete(ctx context.Context, req *leasesapi.DeleteRequest) (*emptypb.Empty, error) {
 	err := m.manager.Delete(ctx, leases.Lease{ID: req.ID})
 	if err != nil {
 		return nil, err
 	}
-	return &types.Empty{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (*LeaseManager) Create(context.Context, *leasesapi.CreateRequest) (*leasesapi.CreateResponse, error) {
@@ -155,11 +160,11 @@ func (m *LeaseManager) List(ctx context.Context, req *leasesapi.ListRequest) (*l
 	return nil, status.Error(codes.Unimplemented, "not yet supported")
 }
 
-func (m *LeaseManager) AddResource(context.Context, *leasesapi.AddResourceRequest) (*types.Empty, error) {
+func (m *LeaseManager) AddResource(context.Context, *leasesapi.AddResourceRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "not yet supported")
 }
 
-func (m *LeaseManager) DeleteResource(context.Context, *leasesapi.DeleteResourceRequest) (*types.Empty, error) {
+func (m *LeaseManager) DeleteResource(context.Context, *leasesapi.DeleteResourceRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "not yet supported")
 }
 
@@ -206,7 +211,7 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 		imageutil.CancelCacheLeases()
 	}
 
-	ch := make(chan client.UsageInfo)
+	ch := make(chan client.UsageInfo, 32)
 
 	eg, ctx := errgroup.WithContext(stream.Context())
 	workers, err := c.opt.WorkerController.List()
@@ -218,9 +223,9 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 	defer func() {
 		if didPrune {
 			if c, ok := c.cache.(interface {
-				ReleaseUnreferenced() error
+				ReleaseUnreferenced(context.Context) error
 			}); ok {
-				if err := c.ReleaseUnreferenced(); err != nil {
+				if err := c.ReleaseUnreferenced(ctx); err != nil {
 					bklog.G(ctx).Errorf("failed to release cache metadata: %+v", err)
 				}
 			}
@@ -248,6 +253,11 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 	})
 
 	eg2.Go(func() error {
+		defer func() {
+			// drain channel on error
+			for range ch {
+			}
+		}()
 		for r := range ch {
 			didPrune = true
 			if err := stream.Send(&controlapi.UsageRecord{
@@ -312,7 +322,7 @@ func (c *Controller) UpdateBuildHistory(ctx context.Context, req *controlapi.Upd
 	return &controlapi.UpdateBuildHistoryResponse{}, err
 }
 
-func translateLegacySolveRequest(req *controlapi.SolveRequest) error {
+func translateLegacySolveRequest(req *controlapi.SolveRequest) {
 	// translates ExportRef and ExportAttrs to new Exports (v0.4.0)
 	if legacyExportRef := req.Cache.ExportRefDeprecated; legacyExportRef != "" {
 		ex := &controlapi.CacheOptionsEntry{
@@ -338,18 +348,13 @@ func translateLegacySolveRequest(req *controlapi.SolveRequest) error {
 		req.Cache.Imports = append(req.Cache.Imports, im)
 	}
 	req.Cache.ImportRefsDeprecated = nil
-	return nil
 }
 
 func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*controlapi.SolveResponse, error) {
 	atomic.AddInt64(&c.buildCount, 1)
 	defer atomic.AddInt64(&c.buildCount, -1)
 
-	// This method registers job ID in solver.Solve. Make sure there are no blocking calls before that might delay this.
-
-	if err := translateLegacySolveRequest(req); err != nil {
-		return nil, err
-	}
+	translateLegacySolveRequest(req)
 
 	defer func() {
 		time.AfterFunc(time.Second, c.throttledGC)
@@ -365,20 +370,11 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 
 	// if SOURCE_DATE_EPOCH is set, enable it for the exporter
 	if v, ok := epoch.ParseBuildArgs(req.FrontendAttrs); ok {
-		if _, ok := req.ExporterAttrs[epoch.KeySourceDateEpoch]; !ok {
+		if _, ok := req.ExporterAttrs[string(exptypes.OptKeySourceDateEpoch)]; !ok {
 			if req.ExporterAttrs == nil {
 				req.ExporterAttrs = make(map[string]string)
 			}
-			req.ExporterAttrs[epoch.KeySourceDateEpoch] = v
-		}
-	}
-
-	if v, ok := req.FrontendAttrs["build-arg:BUILDKIT_BUILDINFO"]; ok && v != "" {
-		if _, ok := req.ExporterAttrs["buildinfo"]; !ok {
-			if req.ExporterAttrs == nil {
-				req.ExporterAttrs = make(map[string]string)
-			}
-			req.ExporterAttrs["buildinfo"] = v
+			req.ExporterAttrs[string(exptypes.OptKeySourceDateEpoch)] = v
 		}
 	}
 
@@ -412,6 +408,10 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		exp.Exporter, err = cacheExporterFunc(ctx, session.NewGroup(req.Session), e.Attrs)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to configure %v cache exporter", e.Type)
+		}
+		if exp.Exporter == nil {
+			bklog.G(ctx).Debugf("cache exporter resolver for %v returned nil, skipping exporter", e.Type)
+			continue
 		}
 		if exportMode, supported := parseCacheExportMode(e.Attrs["mode"]); !supported {
 			bklog.G(ctx).Debugf("skipping invalid cache export mode: %s", e.Attrs["mode"])
@@ -498,6 +498,11 @@ func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Con
 	})
 
 	eg.Go(func() error {
+		defer func() {
+			// drain channel on error
+			for range ch {
+			}
+		}()
 		for {
 			ss, ok := <-ch
 			if !ok {

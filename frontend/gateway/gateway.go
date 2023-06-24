@@ -957,6 +957,7 @@ func (lbf *llbBridgeForwarder) NewContainer(ctx context.Context, in *pb.NewConta
 	ctrReq := NewContainerRequest{
 		ContainerID: in.ContainerID,
 		NetMode:     in.Network,
+		Hostname:    in.Hostname,
 		Platform:    in.Platform,
 		Constraints: in.Constraints,
 	}
@@ -1175,7 +1176,21 @@ func (w *outputWriter) Write(msg []byte) (int, error) {
 	return len(msg), stack.Enable(err)
 }
 
+type execProcessServerThreadSafe struct {
+	pb.LLBBridge_ExecProcessServer
+	sendMu sync.Mutex
+}
+
+func (w *execProcessServerThreadSafe) Send(m *pb.ExecMessage) error {
+	w.sendMu.Lock()
+	defer w.sendMu.Unlock()
+	return w.LLBBridge_ExecProcessServer.Send(m)
+}
+
 func (lbf *llbBridgeForwarder) ExecProcess(srv pb.LLBBridge_ExecProcessServer) error {
+	srv = &execProcessServerThreadSafe{
+		LLBBridge_ExecProcessServer: srv,
+	}
 	eg, ctx := errgroup.WithContext(srv.Context())
 
 	msgs := make(chan *pb.ExecMessage)
@@ -1285,6 +1300,7 @@ func (lbf *llbBridgeForwarder) ExecProcess(srv pb.LLBBridge_ExecProcessServer) e
 				proc, err := ctr.Start(initCtx, gwclient.StartRequest{
 					Args:                      init.Meta.Args,
 					Env:                       init.Meta.Env,
+					SecretEnv:                 init.Secretenv,
 					User:                      init.Meta.User,
 					Cwd:                       init.Meta.Cwd,
 					Tty:                       init.Tty,
@@ -1323,7 +1339,7 @@ func (lbf *llbBridgeForwarder) ExecProcess(srv pb.LLBBridge_ExecProcessServer) e
 					var statusError *rpc.Status
 					if err != nil {
 						statusCode = pb.UnknownExitStatus
-						st, _ := status.FromError(grpcerrors.ToGRPC(err))
+						st, _ := status.FromError(grpcerrors.ToGRPC(ctx, err))
 						stp := st.Proto()
 						statusError = &rpc.Status{
 							Code:    stp.Code,

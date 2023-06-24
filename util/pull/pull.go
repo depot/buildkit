@@ -10,7 +10,7 @@ import (
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
-	"github.com/containerd/containerd/remotes/docker/schema1"
+	"github.com/containerd/containerd/remotes/docker/schema1" //nolint:staticcheck // SA1019 deprecated
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/flightcontrol"
@@ -233,15 +233,15 @@ func filterLayerBlobs(metadata map[digest.Digest]ocispecs.Descriptor, mu sync.Lo
 		switch desc.MediaType {
 		case
 			ocispecs.MediaTypeImageLayer,
-			ocispecs.MediaTypeImageLayerNonDistributable,
+			ocispecs.MediaTypeImageLayerNonDistributable, //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 			images.MediaTypeDockerSchema2Layer,
 			images.MediaTypeDockerSchema2LayerForeign,
 			ocispecs.MediaTypeImageLayerGzip,
 			images.MediaTypeDockerSchema2LayerGzip,
-			ocispecs.MediaTypeImageLayerNonDistributableGzip,
+			ocispecs.MediaTypeImageLayerNonDistributableGzip, //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 			images.MediaTypeDockerSchema2LayerForeignGzip,
 			ocispecs.MediaTypeImageLayerZstd,
-			ocispecs.MediaTypeImageLayerNonDistributableZstd:
+			ocispecs.MediaTypeImageLayerNonDistributableZstd: //nolint:staticcheck // ignore SA1019: Non-distributable layers are deprecated, and not recommended for future use.
 			return nil, images.ErrSkipDesc
 		default:
 			if metadata != nil {

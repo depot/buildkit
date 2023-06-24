@@ -2,10 +2,12 @@
 
 # BuildKit <!-- omit in toc -->
 
-[![GoDoc](https://godoc.org/github.com/moby/buildkit?status.svg)](https://godoc.org/github.com/moby/buildkit/client/llb)
-[![Build Status](https://github.com/moby/buildkit/workflows/build/badge.svg)](https://github.com/moby/buildkit/actions?query=workflow%3Abuild)
-[![Go Report Card](https://goreportcard.com/badge/github.com/moby/buildkit)](https://goreportcard.com/report/github.com/moby/buildkit)
-[![codecov](https://codecov.io/gh/moby/buildkit/branch/master/graph/badge.svg)](https://codecov.io/gh/moby/buildkit)
+[![GitHub Release](https://img.shields.io/github/release/moby/buildkit.svg?style=flat-square)](https://github.com/moby/buildkit/releases/latest)
+[![PkgGoDev](https://img.shields.io/badge/go.dev-docs-007d9c?style=flat-square&logo=go&logoColor=white)](https://pkg.go.dev/github.com/moby/buildkit/client/llb)
+[![CI BuildKit Status](https://img.shields.io/github/actions/workflow/status/moby/buildkit/buildkit.yml?label=buildkit&logo=github&style=flat-square)](https://github.com/moby/buildkit/actions?query=workflow%3Abuildkit)
+[![CI Frontend Status](https://img.shields.io/github/actions/workflow/status/moby/buildkit/frontend.yml?label=frontend&logo=github&style=flat-square)](https://github.com/moby/buildkit/actions?query=workflow%3Afrontend)
+[![Go Report Card](https://goreportcard.com/badge/github.com/moby/buildkit?style=flat-square)](https://goreportcard.com/report/github.com/moby/buildkit)
+[![Codecov](https://img.shields.io/codecov/c/github/moby/buildkit?logo=codecov&style=flat-square)](https://codecov.io/gh/moby/buildkit)
 
 BuildKit is a toolkit for converting source code to build artifacts in an efficient, expressive and repeatable manner.
 
@@ -42,7 +44,6 @@ Join `#buildkit` channel on [Docker Community Slack](https://dockr.ly/comm-slack
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
-
 - [Used by](#used-by)
 - [Quick start](#quick-start)
   - [Starting the `buildkitd` daemon](#starting-the-buildkitd-daemon)
@@ -72,6 +73,7 @@ Join `#buildkit` channel on [Docker Community Slack](https://dockr.ly/comm-slack
   - [Load balancing](#load-balancing)
 - [Containerizing BuildKit](#containerizing-buildkit)
   - [Podman](#podman)
+  - [Nerdctl](#nerdctl)
   - [Kubernetes](#kubernetes)
   - [Daemonless](#daemonless)
 - [Opentracing support](#opentracing-support)
@@ -104,6 +106,7 @@ BuildKit is used by the following projects:
 -   [Dagger](https://dagger.io)
 -   [envd](https://github.com/tensorchord/envd/)
 -   [Depot](https://depot.dev)
+-   [Namespace](https://namespace.so)
 
 ## Quick start
 
@@ -125,7 +128,7 @@ $ brew install buildkit
 
 To build BuildKit from source, see [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md).
 
-For a `buildctl` reference, see [this document](./docs/buildctl.md).
+For a `buildctl` reference, see [this document](./docs/reference/buildctl.md).
 
 ### Starting the `buildkitd` daemon
 
@@ -174,6 +177,7 @@ Currently, the following high-level languages has been implemented for LLB:
 -   [mopy (Python)](https://github.com/cmdjulian/mopy)
 -   [envd (starlark)](https://github.com/tensorchord/envd/)
 -   [Blubber](https://gitlab.wikimedia.org/repos/releng/blubber)
+-   [Bass](https://github.com/vito/bass)
 -   (open a PR to add your own language)
 
 ### Exploring Dockerfiles
@@ -257,8 +261,6 @@ Keys supported by image output:
 * `compression=<uncompressed|gzip|estargz|zstd>`: choose compression type for layers newly created and cached, gzip is default value. estargz should be used with `oci-mediatypes=true`.
 * `compression-level=<value>`: compression level for gzip, estargz (0-9) and zstd (0-22)
 * `force-compression=true`: forcefully apply `compression` option to all layers (including already existing layers)
-* `buildinfo=true`: attach inline build info in [image config](docs/buildinfo.md#image-config) (default `true`)
-* `buildinfo-attrs=true`: attach inline build info attributes in [image config](docs/buildinfo.md#image-config) (default `false`)
 * `store=true`: store the result images to the worker's (e.g. containerd) image store as well as ensures that the image has all blobs in the content store (default `true`). Ignored if the worker doesn't have image store (e.g. OCI worker).
 * `annotation.<key>=<value>`: attach an annotation with the respective `key` and `value` to the built image
   * Using the extended syntaxes, `annotation-<type>.<key>=<value>`, `annotation[<platform>].<key>=<value>` and both combined with `annotation-<type>[<platform>].<key>=<value>`, allows configuring exactly where to attach the annotation.
@@ -268,12 +270,6 @@ Keys supported by image output:
 
 If credentials are required, `buildctl` will attempt to read Docker configuration file `$DOCKER_CONFIG/config.json`.
 `$DOCKER_CONFIG` defaults to `~/.docker`.
-
-> **Warning**
->
-> Build information along `buildinfo` and `buildinfo-attrs` attributes are
-> deprecated and will be removed in the next release. See the [Deprecated features page](./docs/deprecated.md)
-> for status and alternative recommendation about this feature.
 
 #### Local directory
 
@@ -355,7 +351,7 @@ BuildKit supports the following cache exporters:
 * `gha`: export to GitHub Actions cache
 
 In most case you want to use the `inline` cache exporter.
-However, note that the `inline` cache exporter only supports `min` cache mode. 
+However, note that the `inline` cache exporter only supports `min` cache mode.
 To enable `max` cache mode, push the image and the cache separately by using `registry` cache exporter.
 
 `inline` and `registry` exporters both store the cache in the registry. For importing the cache, `type=registry` is sufficient for both, as specifying the cache format is not necessary.
@@ -373,7 +369,7 @@ Note that the inline cache is not imported unless [`--import-cache type=registry
 
 Inline cache embeds cache metadata into the image config. The layers in the image will be left untouched compared to the image with no cache information.
 
-:information_source: Docker-integrated BuildKit (`DOCKER_BUILDKIT=1 docker build`) and `docker buildx`requires 
+:information_source: Docker-integrated BuildKit (`DOCKER_BUILDKIT=1 docker build`) and `docker buildx`requires
 `--build-arg BUILDKIT_INLINE_CACHE=1` to be specified to enable the `inline` cache exporter.
 However, the standalone `buildctl` does NOT require `--opt build-arg:BUILDKIT_INLINE_CACHE=1` and the build-arg is simply ignored.
 
@@ -392,6 +388,7 @@ buildctl build ... \
   * `min`: only export layers for the resulting image
   * `max`: export all the layers of all intermediate steps
 * `ref=<ref>`: specify repository reference to store cache, e.g. `docker.io/user/image:tag`
+* `image-manifest=<true|false>`: whether to export cache manifest as an OCI-compatible image manifest rather than a manifest list/index (default: `false`, must be used with `oci-mediatypes=true`)
 * `oci-mediatypes=<true|false>`: whether to use OCI mediatypes in exported manifests (default: `true`, since BuildKit `v0.8`)
 * `compression=<uncompressed|gzip|estargz|zstd>`: choose compression type for layers newly created and cached, gzip is default value. estargz and zstd should be used with `oci-mediatypes=true`
 * `compression-level=<value>`: choose compression level for gzip, estargz (0-9) and zstd (0-22)
@@ -418,6 +415,7 @@ The directory layout conforms to OCI Image Spec v1.0.
   * `max`: export all the layers of all intermediate steps
 * `dest=<path>`: destination directory for cache exporter
 * `tag=<tag>`: specify custom tag of image to write to local index (default: `latest`)
+* `image-manifest=<true|false>`: whether to export cache manifest as an OCI-compatible image manifest rather than a manifest list/index (default: `false`, must be used with `oci-mediatypes=true`)
 * `oci-mediatypes=<true|false>`: whether to use OCI mediatypes in exported manifests (default `true`, since BuildKit `v0.8`)
 * `compression=<uncompressed|gzip|estargz|zstd>`: choose compression type for layers newly created and cached, gzip is default value. estargz and zstd should be used with `oci-mediatypes=true`.
 * `compression-level=<value>`: compression level for gzip, estargz (0-9) and zstd (0-22)
@@ -482,7 +480,7 @@ Storage locations:
 
 S3 configuration:
 * `blobs_prefix`: global prefix to store / read blobs on s3 (default: `blobs/`)
-* `manifests_prefix`: global prefix to store / read blobs on s3 (default: `manifests/`)
+* `manifests_prefix`: global prefix to store / read manifests on s3 (default: `manifests/`)
 * `endpoint_url`: specify a specific S3 endpoint (default: empty)
 * `use_path_style`: if set to `true`, put the bucket name in the URL instead of in the hostname (default: `false`)
 
@@ -541,6 +539,11 @@ There are 2 options supported for Azure Blob Storage authentication:
 
 * Any system using environment variables supported by the [Azure SDK for Go](https://docs.microsoft.com/en-us/azure/developer/go/azure-sdk-authentication). The configuration must be available for the buildkit daemon, not for the client.
 * Secret Access Key, using the `secret_access_key` attribute to specify the primary or secondary account key for your Azure Blob Storage account. [Azure Blob Storage account keys](https://docs.microsoft.com/en-us/azure/storage/common/storage-account-keys-manage)
+
+> **Note**
+>
+> Account name can also be specified with `account_name` attribute (or `$BUILDKIT_AZURE_STORAGE_ACCOUNT_NAME`)
+> if it is not part of the account URL host.
 
 `--export-cache` options:
 * `type=azblob`
@@ -654,6 +657,16 @@ To connect to a BuildKit daemon running in a Podman container, use `podman-conta
 ```bash
 podman run -d --name buildkitd --privileged moby/buildkit:latest
 buildctl --addr=podman-container://buildkitd build --frontend dockerfile.v0 --local context=. --local dockerfile=. --output type=oci | podman load foo
+```
+
+`sudo` is not required.
+
+### Nerdctl
+To connect to a BuildKit daemon running in a Nerdctl container, use `nerdctl-container://` instead of `docker-container://`.
+
+```bash
+nerdctl run -d --name buildkitd --privileged moby/buildkit:latest
+buildctl --addr=nerdctl-container://buildkitd build --frontend dockerfile.v0 --local context=. --local dockerfile=. --output type=oci | nerdctl load
 ```
 
 `sudo` is not required.

@@ -12,9 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/containerd/containerd/pkg/seed"
+	"github.com/containerd/containerd/pkg/seed" //nolint:staticcheck // SA1019 deprecated
 	"github.com/containerd/containerd/pkg/userns"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes/docker"
@@ -40,6 +39,7 @@ import (
 	"github.com/moby/buildkit/frontend/gateway"
 	"github.com/moby/buildkit/frontend/gateway/forwarder"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/bboltcachestorage"
 	"github.com/moby/buildkit/util/apicaps"
 	"github.com/moby/buildkit/util/appcontext"
@@ -68,12 +68,14 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 func init() {
 	apicaps.ExportedProduct = "buildkit"
 	stack.SetVersionInfo(version.Version, version.Revision)
 
+	//nolint:staticcheck // SA1019 deprecated
 	seed.WithTimeAndRand()
 	if reexec.Init() {
 		os.Exit(0)
@@ -156,6 +158,10 @@ func main() {
 			Name:  "debug",
 			Usage: "enable debug output in logs",
 		},
+		cli.BoolFlag{
+			Name:  "trace",
+			Usage: "enable trace output in logs (highly verbose, could affect performance)",
+		},
 		cli.StringFlag{
 			Name:  "root",
 			Usage: "path to state directory",
@@ -197,6 +203,7 @@ func main() {
 		},
 	)
 	app.Flags = append(app.Flags, appFlags...)
+	app.Flags = append(app.Flags, serviceFlags()...)
 
 	app.Action = func(c *cli.Context) error {
 		// TODO: On Windows this always returns -1. The actual "are you admin" check is very Windows-specific.
@@ -220,6 +227,9 @@ func main() {
 		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 		if cfg.Debug {
 			logrus.SetLevel(logrus.DebugLevel)
+		}
+		if cfg.Trace {
+			logrus.SetLevel(logrus.TraceLevel)
 		}
 
 		if cfg.GRPC.DebugAddress != "" {
@@ -256,6 +266,15 @@ func main() {
 			return errors.Wrapf(err, "failed to create %s", root)
 		}
 
+		// Stop if we are registering or unregistering against Windows SCM.
+		stop, err := registerUnregisterService(cfg.Root)
+		if err != nil {
+			logrus.Fatal(err)
+		}
+		if stop {
+			return nil
+		}
+
 		lockPath := filepath.Join(root, "buildkitd.lock")
 		lock := flock.New(lockPath)
 		locked, err := lock.TryLock()
@@ -277,6 +296,7 @@ func main() {
 		defer controller.Close()
 
 		controller.Register(server)
+		reflection.Register(server)
 
 		ents := c.GlobalStringSlice("allow-insecure-entitlement")
 		if len(ents) > 0 {
@@ -292,6 +312,12 @@ func main() {
 				}
 			}
 		}
+
+		// Launch as a Windows Service if necessary
+		if err := launchService(server); err != nil {
+			logrus.Fatal(err)
+		}
+
 		errCh := make(chan error, 1)
 		if err := serveGRPC(cfg.GRPC, server, errCh); err != nil {
 			return err
@@ -357,13 +383,13 @@ func serveGRPC(cfg config.GRPCConfig, server *grpc.Server, errCh chan error) err
 
 	if os.Getenv("NOTIFY_SOCKET") != "" {
 		notified, notifyErr := sddaemon.SdNotify(false, sddaemon.SdNotifyReady)
-		logrus.Debugf("SdNotifyReady notified=%v, err=%v", notified, notifyErr)
+		bklog.L.Debugf("SdNotifyReady notified=%v, err=%v", notified, notifyErr)
 	}
 	for _, l := range listeners {
 		func(l net.Listener) {
 			eg.Go(func() error {
 				defer l.Close()
-				logrus.Infof("running server on %s", l.Addr())
+				bklog.L.Infof("running server on %s", l.Addr())
 				return server.Serve(l)
 			})
 		}(l)
@@ -388,7 +414,7 @@ func defaultConf() (config.Config, error) {
 		if !errors.As(err, &pe) {
 			return config.Config{}, err
 		}
-		logrus.Warnf("failed to load default config: %v", err)
+		bklog.L.Warnf("failed to load default config: %v", err)
 	}
 	setDefaultConfig(&cfg)
 
@@ -449,6 +475,9 @@ func applyMainFlags(c *cli.Context, cfg *config.Config) error {
 	if c.IsSet("debug") {
 		cfg.Debug = c.Bool("debug")
 	}
+	if c.IsSet("trace") {
+		cfg.Trace = c.Bool("trace")
+	}
 	if c.IsSet("root") {
 		cfg.Root = c.String("root")
 	}
@@ -493,6 +522,8 @@ func applyMainFlags(c *cli.Context, cfg *config.Config) error {
 	if tlsca := c.String("tlscacert"); tlsca != "" {
 		cfg.GRPC.TLS.CA = tlsca
 	}
+	applyPlatformFlags(c)
+
 	return nil
 }
 
@@ -540,7 +571,7 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 	switch proto {
 	case "unix", "npipe":
 		if tlsConfig != nil {
-			logrus.Warnf("TLS is disabled for %s", addr)
+			bklog.L.Warnf("TLS is disabled for %s", addr)
 		}
 		return sys.GetLocalListener(listenAddr, uid, gid)
 	case "fd":
@@ -552,7 +583,7 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 		}
 
 		if tlsConfig == nil {
-			logrus.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
+			bklog.L.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
 			return l, nil
 		}
 		return tls.NewListener(l, tlsConfig), nil
@@ -582,7 +613,7 @@ func unaryInterceptor(globalCtx context.Context, tp trace.TracerProvider) grpc.U
 
 		resp, err = withTrace(ctx, req, info, handler)
 		if err != nil {
-			logrus.Errorf("%s returned error: %v", info.FullMethod, err)
+			bklog.G(ctx).Errorf("%s returned error: %v", info.FullMethod, err)
 			if logrus.GetLevel() >= logrus.DebugLevel {
 				fmt.Fprintf(os.Stderr, "%+v", stack.Formatter(grpcerrors.FromGRPC(err)))
 			}
@@ -641,10 +672,9 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 
 	var traceSocket string
 	if tc != nil {
-		traceSocket = filepath.Join(cfg.Root, "otel-grpc.sock")
+		traceSocket = traceSocketPath(cfg.Root)
 		if err := runTraceController(traceSocket, tc); err != nil {
-			logrus.Warnf("failed set up otel-grpc controller: %v", err)
-			traceSocket = ""
+			return nil, err
 		}
 	}
 
@@ -698,7 +728,7 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 		Frontends:                 frontends,
 		ResolveCacheExporterFuncs: remoteCacheExporterFuncs,
 		ResolveCacheImporterFuncs: remoteCacheImporterFuncs,
-		CacheKeyStorage:           cacheStorage,
+		CacheManager:              solver.NewCacheManager(context.TODO(), "local", cacheStorage, worker.NewCacheResultStorage(wc)),
 		Entitlements:              cfg.Entitlements,
 		TraceCollector:            tc,
 		HistoryDB:                 historyDB,
@@ -722,7 +752,7 @@ func newWorkerController(c *cli.Context, wiOpt workerInitializerOpt) (*worker.Co
 		}
 		for _, w := range ws {
 			p := w.Platforms(false)
-			logrus.Infof("found worker %q, labels=%v, platforms=%v", w.ID(), w.Labels(), formatPlatforms(p))
+			bklog.L.Infof("found worker %q, labels=%v, platforms=%v", w.ID(), w.Labels(), formatPlatforms(p))
 			archutil.WarnIfUnsupported(p)
 			if err = wc.Add(w); err != nil {
 				return nil, err
@@ -737,8 +767,8 @@ func newWorkerController(c *cli.Context, wiOpt workerInitializerOpt) (*worker.Co
 	if err != nil {
 		return nil, err
 	}
-	logrus.Infof("found %d workers, default=%q", nWorkers, defaultWorker.ID())
-	logrus.Warn("currently, only the default worker can be used.")
+	bklog.L.Infof("found %d workers, default=%q", nWorkers, defaultWorker.ID())
+	bklog.L.Warn("currently, only the default worker can be used.")
 	return wc, nil
 }
 
@@ -779,15 +809,15 @@ func getGCPolicy(cfg config.GCConfig, root string) []client.PruneInfo {
 		return nil
 	}
 	if len(cfg.GCPolicy) == 0 {
-		cfg.GCPolicy = config.DefaultGCPolicy(root, cfg.GCKeepStorage)
+		cfg.GCPolicy = config.DefaultGCPolicy(cfg.GCKeepStorage)
 	}
 	out := make([]client.PruneInfo, 0, len(cfg.GCPolicy))
 	for _, rule := range cfg.GCPolicy {
 		out = append(out, client.PruneInfo{
 			Filter:       rule.Filters,
 			All:          rule.All,
-			KeepBytes:    rule.KeepBytes,
-			KeepDuration: time.Duration(rule.KeepDuration) * time.Second,
+			KeepBytes:    rule.KeepBytes.AsBytes(root),
+			KeepDuration: rule.KeepDuration.Duration,
 		})
 	}
 	return out
@@ -825,14 +855,9 @@ func parseBoolOrAuto(s string) (*bool, error) {
 func runTraceController(p string, exp sdktrace.SpanExporter) error {
 	server := grpc.NewServer()
 	tracev1.RegisterTraceServiceServer(server, &traceCollector{exporter: exp})
-	uid := os.Getuid()
-	l, err := sys.GetLocalListener(p, uid, uid)
+	l, err := getLocalListener(p)
 	if err != nil {
-		return err
-	}
-	if err := os.Chmod(p, 0666); err != nil {
-		l.Close()
-		return err
+		return errors.Wrap(err, "creating trace controller listener")
 	}
 	go server.Serve(l)
 	return nil

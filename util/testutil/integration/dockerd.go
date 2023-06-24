@@ -1,13 +1,13 @@
 package integration
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/client"
@@ -19,10 +19,10 @@ import (
 
 // InitDockerdWorker registers a dockerd worker with the global registry.
 func InitDockerdWorker() {
-	Register(&moby{
-		name:     "dockerd",
-		rootless: false,
-		unsupported: []string{
+	Register(&Moby{
+		ID:         "dockerd",
+		IsRootless: false,
+		Unsupported: []string{
 			FeatureCacheExport,
 			FeatureCacheImport,
 			FeatureCacheBackendAzblob,
@@ -42,31 +42,35 @@ func InitDockerdWorker() {
 			FeatureCNINetwork,
 		},
 	})
-	Register(&moby{
-		name:     "dockerd-containerd",
-		rootless: false,
-		unsupported: []string{
+	Register(&Moby{
+		ID:                    "dockerd-containerd",
+		IsRootless:            false,
+		ContainerdSnapshotter: true,
+		Unsupported: []string{
 			FeatureSecurityMode,
 			FeatureCNINetwork,
 		},
 	})
 }
 
-type moby struct {
-	name        string
-	rootless    bool
-	unsupported []string
+type Moby struct {
+	ID         string
+	IsRootless bool
+
+	ContainerdSnapshotter bool
+
+	Unsupported []string
 }
 
-func (c moby) Name() string {
-	return c.name
+func (c Moby) Name() string {
+	return c.ID
 }
 
-func (c moby) Rootless() bool {
-	return c.rootless
+func (c Moby) Rootless() bool {
+	return c.IsRootless
 }
 
-func (c moby) New(ctx context.Context, cfg *BackendConfig) (b Backend, cl func() error, err error) {
+func (c Moby) New(ctx context.Context, cfg *BackendConfig) (b Backend, cl func() error, err error) {
 	if err := requireRoot(); err != nil {
 		return nil, nil, err
 	}
@@ -78,7 +82,7 @@ func (c moby) New(ctx context.Context, cfg *BackendConfig) (b Backend, cl func()
 
 	dcfg := dockerd.Config{
 		Features: map[string]bool{
-			"containerd-snapshotter": c.name == "dockerd-containerd",
+			"containerd-snapshotter": c.ContainerdSnapshotter,
 		},
 	}
 	if reg, ok := bkcfg.Registries["docker.io"]; ok && len(reg.Mirrors) > 0 {
@@ -130,21 +134,23 @@ func (c moby) New(ctx context.Context, cfg *BackendConfig) (b Backend, cl func()
 		return nil, nil, err
 	}
 
-	err = d.StartWithError(cfg.Logs,
+	dockerdFlags := []string{
 		"--config-file", dockerdConfigFile,
 		"--userland-proxy=false",
-		"--bip", "10.66.66.1/24",
-		"--default-address-pool", "base=10.66.66.0/16,size=24",
 		"--debug",
-	)
+	}
+	if s := os.Getenv("BUILDKIT_INTEGRATION_DOCKERD_FLAGS"); s != "" {
+		dockerdFlags = append(dockerdFlags, strings.Split(strings.TrimSpace(s), "\n")...)
+	}
+
+	err = d.StartWithError(cfg.Logs, dockerdFlags...)
 	if err != nil {
 		return nil, nil, err
 	}
 	deferF.append(d.StopWithError)
 
-	logs := map[string]*bytes.Buffer{}
-	if err := waitUnix(d.Sock(), 5*time.Second); err != nil {
-		return nil, nil, errors.Errorf("dockerd did not start up: %q, %s", err, formatLogs(logs))
+	if err := waitUnix(d.Sock(), 5*time.Second, nil); err != nil {
+		return nil, nil, errors.Errorf("dockerd did not start up: %q, %s", err, formatLogs(cfg.Logs))
 	}
 
 	dockerAPI, err := client.NewClientWithOpts(client.WithHost(d.Sock()))
@@ -206,10 +212,15 @@ func (c moby) New(ctx context.Context, cfg *BackendConfig) (b Backend, cl func()
 
 	return backend{
 		address:             "unix://" + listener.Addr().String(),
-		rootless:            c.rootless,
+		dockerAddress:       d.Sock(),
+		rootless:            c.IsRootless,
 		isDockerd:           true,
-		unsupportedFeatures: c.unsupported,
+		unsupportedFeatures: c.Unsupported,
 	}, cl, nil
+}
+
+func (c Moby) Close() error {
+	return nil
 }
 
 func waitForAPI(ctx context.Context, apiClient *client.Client, d time.Duration) error {

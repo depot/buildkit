@@ -14,10 +14,8 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/rootfs"
-	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/depot"
@@ -40,14 +38,7 @@ import (
 )
 
 const (
-	keyPush           = "push"
-	keyPushByDigest   = "push-by-digest"
-	keyInsecure       = "registry.insecure"
-	keyUnpack         = "unpack"
-	keyDanglingPrefix = "dangling-name-prefix"
-	keyNameCanonical  = "name-canonical"
-	keyStore          = "store"
-	DepotExportLease  = "depot.export.lease"
+	DepotExportLease = "depot.export.lease"
 
 	// keyUnsafeInternalStoreAllowIncomplete should only be used for tests. This option allows exporting image to the image store
 	// as well as lacking some blobs in the content store. Some integration tests for lazyref behaviour depends on this option.
@@ -83,20 +74,19 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 			RefCfg: cacheconfig.RefConfig{
 				Compression: compression.New(compression.Default),
 			},
-			BuildInfo:               true,
 			ForceInlineAttestations: true,
 		},
 		store: true,
 	}
 
-	opt, err := i.opts.Load(opt)
+	opt, err := i.opts.Load(ctx, opt)
 	if err != nil {
 		return nil, err
 	}
 
 	for k, v := range opt {
-		switch k {
-		case keyPush:
+		switch exptypes.ImageExporterOptKey(k) {
+		case exptypes.OptKeyPush:
 			if v == "" {
 				i.push = true
 				continue
@@ -106,7 +96,7 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 				return nil, errors.Wrapf(err, "non-bool value specified for %s", k)
 			}
 			i.push = b
-		case keyPushByDigest:
+		case exptypes.OptKeyPushByDigest:
 			if v == "" {
 				i.pushByDigest = true
 				continue
@@ -116,7 +106,7 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 				return nil, errors.Wrapf(err, "non-bool value specified for %s", k)
 			}
 			i.pushByDigest = b
-		case keyInsecure:
+		case exptypes.OptKeyInsecure:
 			if v == "" {
 				i.insecure = true
 				continue
@@ -126,7 +116,7 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 				return nil, errors.Wrapf(err, "non-bool value specified for %s", k)
 			}
 			i.insecure = b
-		case keyUnpack:
+		case exptypes.OptKeyUnpack:
 			if v == "" {
 				i.unpack = true
 				continue
@@ -136,7 +126,7 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 				return nil, errors.Wrapf(err, "non-bool value specified for %s", k)
 			}
 			i.unpack = b
-		case keyStore:
+		case exptypes.OptKeyStore:
 			if v == "" {
 				i.store = true
 				continue
@@ -156,9 +146,9 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 				return nil, errors.Wrapf(err, "non-bool value specified for %s", k)
 			}
 			i.storeAllowIncomplete = b
-		case keyDanglingPrefix:
+		case exptypes.OptKeyDanglingPrefix:
 			i.danglingPrefix = v
-		case keyNameCanonical:
+		case exptypes.OptKeyNameCanonical:
 			if v == "" {
 				i.nameCanonical = true
 				continue
@@ -442,8 +432,6 @@ func (e *imageExporterInstance) pushImage(ctx context.Context, src *exporter.Sou
 			}
 		}
 	}
-
-	ctx = remotes.WithMediaTypeKeyPrefix(ctx, intoto.PayloadType, "intoto")
 	return push.Push(ctx, e.opt.SessionManager, sessionID, mprovider, e.opt.ImageWriter.ContentStore(), dgst, targetName, e.insecure, e.opt.RegistryHosts, e.pushByDigest, annotations)
 }
 

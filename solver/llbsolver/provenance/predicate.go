@@ -56,20 +56,29 @@ type BuildKitMetadata struct {
 }
 
 func slsaMaterials(srcs Sources) ([]slsa.ProvenanceMaterial, error) {
-	count := len(srcs.Images) + len(srcs.Git) + len(srcs.HTTP) + len(srcs.LocalImages)
+	count := len(srcs.Images) + len(srcs.Git) + len(srcs.HTTP)
 	out := make([]slsa.ProvenanceMaterial, 0, count)
 
 	for _, s := range srcs.Images {
-		uri, err := purl.RefToPURL(s.Ref, s.Platform)
+		var uri string
+		var err error
+		if s.Local {
+			uri, err = purl.RefToPURL(packageurl.TypeOCI, s.Ref, s.Platform)
+		} else {
+			uri, err = purl.RefToPURL(packageurl.TypeDocker, s.Ref, s.Platform)
+		}
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, slsa.ProvenanceMaterial{
+		material := slsa.ProvenanceMaterial{
 			URI: uri,
-			Digest: slsa.DigestSet{
+		}
+		if s.Digest != "" {
+			material.Digest = slsa.DigestSet{
 				s.Digest.Algorithm().String(): s.Digest.Hex(),
-			},
-		})
+			}
+		}
+		out = append(out, material)
 	}
 
 	for _, s := range srcs.Git {
@@ -90,22 +99,6 @@ func slsaMaterials(srcs Sources) ([]slsa.ProvenanceMaterial, error) {
 		})
 	}
 
-	for _, s := range srcs.LocalImages {
-		q := []packageurl.Qualifier{}
-		if s.Platform != nil {
-			q = append(q, packageurl.Qualifier{
-				Key:   "platform",
-				Value: platforms.Format(*s.Platform),
-			})
-		}
-		packageurl.NewPackageURL(packageurl.TypeOCI, "", s.Ref, "", q, "")
-		out = append(out, slsa.ProvenanceMaterial{
-			URI: s.Ref,
-			Digest: slsa.DigestSet{
-				s.Digest.Algorithm().String(): s.Digest.Hex(),
-			},
-		})
-	}
 	return out, nil
 }
 

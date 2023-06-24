@@ -6,7 +6,7 @@ import (
 
 	"github.com/containerd/continuity/fs/fstest"
 	"github.com/moby/buildkit/client"
-	"github.com/moby/buildkit/frontend/dockerfile/builder"
+	"github.com/moby/buildkit/frontend/dockerui"
 	"github.com/moby/buildkit/solver/errdefs"
 	"github.com/moby/buildkit/util/testutil/integration"
 	"github.com/stretchr/testify/require"
@@ -87,8 +87,8 @@ env bar=baz`,
 
 			_, err = f.Solve(sb.Context(), c, client.SolveOpt{
 				LocalDirs: map[string]string{
-					builder.DefaultLocalNameDockerfile: dir,
-					builder.DefaultLocalNameContext:    dir,
+					dockerui.DefaultLocalNameDockerfile: dir,
+					dockerui.DefaultLocalNameContext:    dir,
 				},
 			}, nil)
 			require.Error(t, err)
@@ -97,6 +97,7 @@ env bar=baz`,
 			require.Equal(t, 1, len(srcs))
 
 			require.Equal(t, "Dockerfile", srcs[0].Info.Filename)
+			require.Equal(t, "Dockerfile", srcs[0].Info.Language)
 			require.Equal(t, tc.dockerfile, string(srcs[0].Info.Data))
 			require.Equal(t, len(tc.errorLine), len(srcs[0].Ranges))
 			require.NotNil(t, srcs[0].Info.Definition)

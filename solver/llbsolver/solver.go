@@ -2,7 +2,6 @@ package llbsolver
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
@@ -27,8 +27,7 @@ import (
 	"github.com/moby/buildkit/solver/llbsolver/provenance"
 	"github.com/moby/buildkit/solver/result"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
-	"github.com/moby/buildkit/util/attestation"
-	"github.com/moby/buildkit/util/buildinfo"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/entitlements"
 	"github.com/moby/buildkit/util/grpcerrors"
@@ -37,7 +36,6 @@ import (
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
@@ -212,7 +210,7 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 			if err != nil {
 				return nil, nil, err
 			}
-			w, err := s.history.OpenBlobWriter(ctx, attestation.MediaTypeDockerSchema2AttestationType)
+			w, err := s.history.OpenBlobWriter(ctx, intoto.PayloadType)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -333,7 +331,7 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 		}()
 
 		if err != nil {
-			st, ok := grpcerrors.AsGRPCStatus(grpcerrors.ToGRPC(err))
+			st, ok := grpcerrors.AsGRPCStatus(grpcerrors.ToGRPC(ctx, err))
 			if !ok {
 				st = status.New(codes.Unknown, err.Error())
 			}
@@ -349,7 +347,7 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 		}
 
 		if stopTrace == nil {
-			logrus.Warn("no trace recorder found, skipping")
+			bklog.G(ctx).Warn("no trace recorder found, skipping")
 			return err
 		}
 		go func() {
@@ -391,7 +389,7 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 				}
 				return nil
 			}(); err != nil {
-				logrus.Errorf("failed to save trace for %s: %+v", id, err)
+				bklog.G(ctx).Errorf("failed to save trace for %s: %+v", id, err)
 			}
 		}()
 
@@ -568,9 +566,6 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		if strings.HasPrefix(k, "frontend.") {
 			exporterResponse[k] = string(v)
 		}
-		if strings.HasPrefix(k, exptypes.ExporterBuildInfo) {
-			exporterResponse[k] = base64.StdEncoding.EncodeToString(v)
-		}
 	}
 	for k, v := range cacheExporterResponse {
 		if strings.HasPrefix(k, "cache.") {
@@ -700,9 +695,6 @@ func addProvenanceToResult(res *frontend.Result, br *provenanceBridge) (*Result,
 		if res.Metadata == nil {
 			res.Metadata = map[string][]byte{}
 		}
-		if err := buildinfo.AddMetadata(res.Metadata, exptypes.ExporterBuildInfo, cp); err != nil {
-			return nil, err
-		}
 	}
 
 	if len(res.Refs) != 0 {
@@ -716,9 +708,6 @@ func addProvenanceToResult(res *frontend.Result, br *provenanceBridge) (*Result,
 		out.Provenance.Refs[k] = cp
 		if res.Metadata == nil {
 			res.Metadata = map[string][]byte{}
-		}
-		if err := buildinfo.AddMetadata(res.Metadata, fmt.Sprintf("%s/%s", exptypes.ExporterBuildInfo, k), cp); err != nil {
-			return nil, err
 		}
 	}
 
@@ -892,6 +881,7 @@ func defaultResolver(wc *worker.Controller) ResolveWorkerFunc {
 		return wc.GetDefault()
 	}
 }
+
 func allWorkers(wc *worker.Controller) func(func(w worker.Worker) error) error {
 	return func(f func(worker.Worker) error) error {
 		all, err := wc.List()
@@ -917,27 +907,26 @@ func inBuilderContext(ctx context.Context, b solver.Builder, name, id string, f 
 	}
 	return b.InContext(ctx, func(ctx context.Context, g session.Group) error {
 		pw, _, ctx := progress.NewFromContext(ctx, progress.WithMetadata("vertex", v.Digest))
-		notifyCompleted := notifyStarted(ctx, &v, false)
+		notifyCompleted := notifyStarted(ctx, &v)
 		defer pw.Close()
 		err := f(ctx, g)
-		notifyCompleted(err, false)
+		notifyCompleted(err)
 		return err
 	})
 }
 
-func notifyStarted(ctx context.Context, v *client.Vertex, cached bool) func(err error, cached bool) {
+func notifyStarted(ctx context.Context, v *client.Vertex) func(err error) {
 	pw, _, _ := progress.NewFromContext(ctx)
 	start := time.Now()
 	v.Started = &start
 	v.Completed = nil
-	v.Cached = cached
 	id := identity.NewID()
 	pw.Write(id, *v)
-	return func(err error, cached bool) {
+	return func(err error) {
 		defer pw.Close()
 		stop := time.Now()
 		v.Completed = &stop
-		v.Cached = cached
+		v.Cached = false
 		if err != nil {
 			v.Error = err.Error()
 		}

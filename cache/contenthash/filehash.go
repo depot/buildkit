@@ -2,12 +2,12 @@ package contenthash
 
 import (
 	"archive/tar"
-	"crypto/sha256"
 	"hash"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/minio/sha256-simd"
 	fstypes "github.com/tonistiigi/fsutil/types"
 )
 

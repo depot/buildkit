@@ -6,17 +6,15 @@ package cache
 import (
 	"bufio"
 	"context"
-	"hash"
 	"io"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/mount"
-	"github.com/minio/sha256-simd"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/overlay"
-	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 )
@@ -55,7 +53,7 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 	bufW := bufio.NewWriterSize(cw, 128*1024)
 	var labels map[string]string
 	if compressorFunc != nil {
-		dgstr := NewFastDigester()
+		dgstr := depot.NewFastDigester()
 		compressed, err := compressorFunc(bufW, mediaType)
 		if err != nil {
 			return emptyDesc, false, errors.Wrap(err, "failed to get compressed stream")
@@ -115,22 +113,4 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 		Size:      cinfo.Size,
 		Digest:    cinfo.Digest,
 	}, true, nil
-}
-
-type FastDigester struct {
-	hash hash.Hash
-}
-
-func NewFastDigester() *FastDigester {
-	return &FastDigester{
-		hash: sha256.New(),
-	}
-}
-
-func (d *FastDigester) Hash() hash.Hash {
-	return d.hash
-}
-
-func (d *FastDigester) Digest() digest.Digest {
-	return digest.NewDigest(digest.SHA256, d.hash)
 }

@@ -39,6 +39,7 @@ import (
 	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
@@ -1474,7 +1475,7 @@ func getCompressor(w io.Writer, compressionType compression.Type, customized boo
 		}
 		go func() {
 			defer close(done)
-			gw := estargz.NewWriterLevel(w, level)
+			gw := depot.NewWriterWithCompressor(w, depot.NewGzipCompressorWithLevel(level))
 			if err := gw.AppendTarLossLess(pr); err != nil {
 				pr.CloseWithError(err)
 				return
@@ -2467,8 +2468,8 @@ func checkDiskUsage(ctx context.Context, t *testing.T, cm Manager, inuse, unused
 }
 
 func esgzBlobDigest(uncompressedBlobBytes []byte) (blobDigest digest.Digest, err error) {
-	esgzDigester := digest.Canonical.Digester()
-	w := estargz.NewWriterLevel(esgzDigester.Hash(), gzip.DefaultCompression)
+	esgzDigester := depot.NewFastDigester()
+	w := depot.NewWriterWithCompressor(esgzDigester.Hash(), depot.NewGzipCompressorWithLevel(gzip.DefaultCompression))
 	if err := w.AppendTarLossLess(bytes.NewReader(uncompressedBlobBytes)); err != nil {
 		return "", err
 	}

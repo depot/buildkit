@@ -2,7 +2,6 @@ package compression
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/klauspost/pgzip"
 	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/util/iohelper"
 	digest "github.com/opencontainers/go-digest"
@@ -51,11 +51,11 @@ func (c estargzType) Compress(ctx context.Context, comp Config) (compressorFunc 
 
 				blobInfoW, bInfoCh := calculateBlobInfo()
 				defer blobInfoW.Close()
-				level := gzip.DefaultCompression
+				level := pgzip.DefaultCompression
 				if comp.Level != nil {
 					level = *comp.Level
 				}
-				w := estargz.NewWriterLevel(io.MultiWriter(dest, blobInfoW), level)
+				w := depot.NewWriterWithCompressor(io.MultiWriter(dest, blobInfoW), depot.NewGzipCompressorWithLevel(level))
 
 				// Using lossless API here to make sure that decompressEStargz provides the exact
 				// same tar as the original.

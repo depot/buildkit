@@ -19,6 +19,7 @@ COMMANDS:
    prune-histories  clean up build histories
    build, b         build
    debug            debug utilities
+   health           Checks the buildkitd gRPC health
    help, h          Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:

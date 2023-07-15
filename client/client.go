@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 type Client struct {
@@ -192,6 +193,10 @@ func (c *Client) LeasesClient() leasesapi.LeasesClient {
 
 func (c *Client) LLBBridgeClient() gatewayapi.LLBBridgeClient {
 	return gatewayapi.NewLLBBridgeClient(c.conn)
+}
+
+func (c *Client) HealthClient() grpc_health_v1.HealthClient {
+	return grpc_health_v1.NewHealthClient(c.conn)
 }
 
 func (c *Client) Dialer() session.Dialer {

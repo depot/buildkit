@@ -694,6 +694,13 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 	frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(wc, dockerfile.Build)
 	frontends["gateway.v0"] = gateway.NewGatewayFrontend(wc)
 
+	// From: https://github.com/containerd/containerd/pull/6761
+	// Reading bbolt's freelist sometimes fails when the file has a data corruption.
+	// Disabling freelist sync reduces the chance of the breakage.
+	// https://github.com/etcd-io/bbolt/pull/1
+	// https://github.com/etcd-io/bbolt/pull/6
+	bbolt.DefaultOptions.NoFreelistSync = true
+
 	cacheStorage, err := bboltcachestorage.NewStore(filepath.Join(cfg.Root, "cache.db"))
 	if err != nil {
 		return nil, err

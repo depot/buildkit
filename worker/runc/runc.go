@@ -91,7 +91,14 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		return opt, err
 	}
 
-	db, err := bolt.Open(filepath.Join(root, "containerdmeta.db"), 0644, nil)
+	options := *bolt.DefaultOptions
+	// Reading bbolt's freelist sometimes fails when the file has a data corruption.
+	// Disabling freelist sync reduces the chance of the breakage.
+	// https://github.com/etcd-io/bbolt/pull/1
+	// https://github.com/etcd-io/bbolt/pull/6
+	options.NoFreelistSync = true
+
+	db, err := bolt.Open(filepath.Join(root, "containerdmeta.db"), 0644, &options)
 	if err != nil {
 		return opt, err
 	}

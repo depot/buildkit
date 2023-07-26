@@ -166,3 +166,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.67 // indirect
 )
+
+replace github.com/containerd/stargz-snapshotter => github.com/depot/stargz-snapshotter v0.13.0-depot.1

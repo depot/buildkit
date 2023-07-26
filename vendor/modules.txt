@@ -370,8 +370,8 @@ github.com/containerd/nydus-snapshotter/pkg/converter
 github.com/containerd/nydus-snapshotter/pkg/converter/tool
 github.com/containerd/nydus-snapshotter/pkg/errdefs
 github.com/containerd/nydus-snapshotter/pkg/label
-# github.com/containerd/stargz-snapshotter v0.14.3
-## explicit; go 1.19
+# github.com/containerd/stargz-snapshotter v0.13.0 => github.com/depot/stargz-snapshotter v0.13.0-depot.1
+## explicit; go 1.16
 github.com/containerd/stargz-snapshotter/cache
 github.com/containerd/stargz-snapshotter/fs
 github.com/containerd/stargz-snapshotter/fs/config
@@ -1042,9 +1042,13 @@ google.golang.org/protobuf/types/pluginpb
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+<<<<<<< HEAD
 # kernel.org/pub/linux/libs/security/libcap/cap v1.2.67
 ## explicit; go 1.11
 kernel.org/pub/linux/libs/security/libcap/cap
 # kernel.org/pub/linux/libs/security/libcap/psx v1.2.67
 ## explicit; go 1.11
 kernel.org/pub/linux/libs/security/libcap/psx
+=======
+# github.com/containerd/stargz-snapshotter => github.com/depot/stargz-snapshotter v0.13.0-depot.1
+>>>>>>> 3ab106c64 (fix: rollback boltdb transaction to stop deadlock)

@@ -396,6 +396,7 @@ func NewStore(dbPath string) (*Store, error) {
 
 // Called by cacheManager.init to load all records.
 func (s *Store) KeyIDs() ([]string, error) {
+	logrus.Info("loading all keys")
 	var out []string
 	err := s.DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(mainBucket))
@@ -407,12 +408,14 @@ func (s *Store) KeyIDs() ([]string, error) {
 			return nil
 		})
 	})
+	logrus.Infof("loaded all keys %d", len(out))
 	return out, errors.WithStack(err)
 }
 
 // TODO: Used once in cacheManager.search.  Seems like it is called quite a bit.
 // Seems as if we only need to return the ids.
 func (s *Store) Search(index string) ([]*StorageItem, error) {
+	logrus.Infof("searching for %s", index)
 	var out []*StorageItem
 	err := s.DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(indexBucket))
@@ -447,12 +450,15 @@ func (s *Store) Search(index string) ([]*StorageItem, error) {
 		}
 		return nil
 	})
+
+	logrus.Infof("Search found %d", len(out))
 	return out, errors.WithStack(err)
 }
 
 // TODO: used in several places.  Some of them appear to be crash cleanups.
 func (s *Store) Delete(id string) error {
-	return errors.WithStack(s.DB.Update(func(tx *bolt.Tx) error {
+	logrus.Infof("deleting %s", id)
+	err := s.DB.Update(func(tx *bolt.Tx) error {
 		external := tx.Bucket([]byte(externalBucket))
 		if external != nil {
 			external.DeleteBucket([]byte(id))
@@ -482,10 +488,15 @@ func (s *Store) Delete(id string) error {
 			}
 		}
 		return main.DeleteBucket([]byte(id))
-	}))
+	})
+
+	logrus.WithError(err).Infof("deleted %s", id)
+
+	return errors.WithStack(err)
 }
 
 func (s *Store) SetValues(values []VVVVV) error {
+	logrus.Infof("setting values %+#v", values)
 	err := s.DB.Update(func(tx *bolt.Tx) error {
 		for _, v := range values {
 			// Indexes are key only and are used to seek to the first "key" and then linear
@@ -508,19 +519,25 @@ func (s *Store) SetValues(values []VVVVV) error {
 		}
 		return nil
 	})
+
+	logrus.WithError(err).Info("set values")
 	return errors.WithStack(err)
 }
 
 func (s *Store) ClearValue(id string, bucket Bucket, key string) error {
+	logrus.Infof("clearing value %s %s %s", id, bucket, key)
+
 	err := s.DB.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucket.String()))
 		return bucket.Put([]byte(key), nil)
 	})
 
+	logrus.WithError(err).Infof("cleared value %s %s %s", id, bucket, key)
 	return errors.WithStack(err)
 }
 
 func (s *Store) ClearIndexedValue(id string, bucket Bucket, index, key string) error {
+	logrus.Infof("clearing indexed value %s %s %s %s", id, bucket, index, key)
 	indexKey := boltIndexKey(index, id)
 	err := s.DB.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bucket.String()))
@@ -534,10 +551,13 @@ func (s *Store) ClearIndexedValue(id string, bucket Bucket, index, key string) e
 		return nil
 	})
 
+	logrus.WithError(err).Infof("cleared indexed value %s %s %s %s", id, bucket, index, key)
+
 	return errors.WithStack(err)
 }
 
 func (s *Store) GetExternal(id, key string) ([]byte, error) {
+	logrus.Infof("getting external %s %s", id, key)
 	var buf []byte
 	err := s.DB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(externalBucket))
@@ -557,6 +577,8 @@ func (s *Store) GetExternal(id, key string) ([]byte, error) {
 		copy(buf, buf2)
 		return nil
 	})
+	logrus.WithError(err).Infof("got external %s %s", id, key)
+
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -565,7 +587,9 @@ func (s *Store) GetExternal(id, key string) ([]byte, error) {
 
 // TODO: Called from cacheMetadata.GetEqualMutable and cacheMetadata.getMetadata.
 func (s *Store) Get(id string) (*StorageItem, bool) {
+	logrus.Infof("getting %s", id)
 	empty := func() *StorageItem {
+		logrus.Infof("got empty %s", id)
 		return NewStorageItem(id, s)
 	}
 	tx, err := s.DB.Begin(false)
@@ -582,7 +606,8 @@ func (s *Store) Get(id string) (*StorageItem, bool) {
 		return empty(), false
 	}
 
-	values, _ := s.load(id)
+	values, err := s.load(id)
+	logrus.WithError(err).Infof("got %s", id)
 	return NewStorageItemWithValues(id, s, values), true
 }
 
@@ -613,6 +638,7 @@ func (s *Store) load(id string) (map[string]*Value, error) {
 }
 
 func (s *Store) Exists(id string) bool {
+	logrus.Infof("checking if %s exists", id)
 	tx, err := s.DB.Begin(false)
 	if err != nil {
 		return false
@@ -623,6 +649,7 @@ func (s *Store) Exists(id string) bool {
 		return false
 	}
 	b = b.Bucket([]byte(id))
+	logrus.Infof("exists %s %v", id, b != nil)
 	return b != nil
 }
 
@@ -699,8 +726,10 @@ func (s *StorageItem) AppendStrings(key string, elems []string) error {
 
 	cur := s.values[key]
 	var curStrs []string
-	if err := cur.Unmarshal(&curStrs); err != nil {
-		return err
+	if cur != nil {
+		if err := cur.Unmarshal(&curStrs); err != nil {
+			return err
+		}
 	}
 
 	indices := make(map[string]struct{}, len(elems))
@@ -764,6 +793,15 @@ func (s *StorageItem) Commit() error {
 
 	values := []VVVVV{}
 	for _, kv := range s.queue {
+		if kv.Value == nil {
+			err := s.storage.ClearValue(s.id, Main, kv.Key)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+
+			continue
+		}
+
 		buf, err := json.Marshal(kv.Value)
 		if err != nil {
 			return errors.WithStack(err)

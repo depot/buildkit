@@ -538,7 +538,11 @@ func (s *Store) SetValues(values []VVVVV) error {
 			if v.Bucket == Index {
 				bucket := tx.Bucket([]byte(v.Bucket.String()))
 				key := boltIndexKey(v.KeyName, v.ID)
-				return bucket.Put([]byte(key), []byte{})
+				err := bucket.Put([]byte(key), []byte{})
+				if err != nil {
+					return err
+				}
+				continue
 			}
 
 			bucket := tx.Bucket([]byte(v.Bucket.String()))

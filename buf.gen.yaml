@@ -1,0 +1,17 @@
+version: v1
+
+managed:
+  enabled: true
+  go_package_prefix:
+    default: github.com/moby/buildkit/depot/api
+    except:
+      - buf.build/googleapis/googleapis
+      - buf.build/depot/buildkit
+
+plugins:
+  - plugin: buf.build/protocolbuffers/go:v1.30.0
+    out: depot/api
+    opt: paths=source_relative
+  - plugin: buf.build/bufbuild/connect-go:v1.7.0
+    out: depot/api
+    opt: paths=source_relative

@@ -3,11 +3,14 @@ package control
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/bufbuild/connect-go"
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
 	leasesapi "github.com/containerd/containerd/api/services/leases/v1"
 	"github.com/containerd/containerd/content"
@@ -22,6 +25,8 @@ import (
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	controlgateway "github.com/moby/buildkit/control/gateway"
+	cloudv3 "github.com/moby/buildkit/depot/api"
+	"github.com/moby/buildkit/depot/api/cloudv3connect"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/exporter/util/epoch"
@@ -49,7 +54,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -473,12 +480,22 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 }
 
 func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Control_StatusServer) error {
+	var spiffeID string
+	ctx := stream.Context()
+	peer, ok := peer.FromContext(ctx)
+	if ok {
+		tlsInfo, ok := peer.AuthInfo.(credentials.TLSInfo)
+		if ok && tlsInfo.SPIFFEID != nil {
+			spiffeID = tlsInfo.SPIFFEID.String()
+		}
+	}
+
 	if err := sendTimestampHeader(stream); err != nil {
 		return err
 	}
 	ch := make(chan *client.SolveStatus, 8)
 
-	eg, ctx := errgroup.WithContext(stream.Context())
+	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		return c.solver.Status(ctx, req.Ref, ch)
 	})
@@ -489,14 +506,45 @@ func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Con
 			for range ch {
 			}
 		}()
+
+		var sender *connect.ClientStreamForClient[cloudv3.ReportStatusRequest, cloudv3.ReportStatusResponse]
+		token := os.Getenv("DEPOT_BUILDKIT_TOKEN")
+		if spiffeID != "" && token != "" {
+			depotclient := NewDepotClient()
+			sender = depotclient.ReportStatus(ctx)
+			sender.RequestHeader().Add("Authorization", "Bearer "+token)
+		}
+
 		for {
 			ss, ok := <-ch
 			if !ok {
+				if sender != nil {
+					_, err := sender.CloseAndReceive()
+					if err != nil {
+						bklog.G(ctx).WithError(err).Errorf("unable to close status sender")
+					}
+				}
+
 				return nil
 			}
+
 			for _, sr := range ss.Marshal() {
 				if err := stream.SendMsg(sr); err != nil {
 					return err
+				}
+				if sender != nil {
+					stableDigests := make(map[string]string, len(sr.Vertexes))
+					for _, v := range sr.Vertexes {
+						stableDigests[v.Digest.String()] = v.StableDigest.String()
+					}
+					req := &cloudv3.ReportStatusRequest{
+						SpiffeId:      spiffeID,
+						Status:        sr,
+						StableDigests: stableDigests,
+					}
+					if err := sender.Send(req); err != nil {
+						bklog.G(ctx).WithError(err).Errorf("unable to send status to API")
+					}
 				}
 			}
 		}
@@ -695,4 +743,12 @@ const timestampKey = "buildkit-current-timestamp"
 
 func sendTimestampHeader(srv grpc.ServerStream) error {
 	return srv.SendHeader(metadata.Pairs(timestampKey, time.Now().Format(time.RFC3339Nano)))
+}
+
+func NewDepotClient() cloudv3connect.MachineServiceClient {
+	baseURL := os.Getenv("DEPOT_API_URL")
+	if baseURL == "" {
+		baseURL = "https://api.depot.dev"
+	}
+	return cloudv3connect.NewMachineServiceClient(http.DefaultClient, baseURL)
 }

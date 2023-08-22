@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package depot.cloud.v3;
+
+import "moby/buildkit/v1/control.proto";
+
+service MachineService {
+  rpc RegisterMachine(RegisterMachineRequest) returns (stream RegisterMachineResponse);
+  rpc PingMachineHealth(PingMachineHealthRequest) returns (PingMachineHealthResponse);
+  rpc Usage(UsageRequest) returns (UsageResponse);
+  rpc ReportStatus(stream ReportStatusRequest) returns (ReportStatusResponse);
+}
+
+message RegisterMachineRequest {
+  string connection_id = 1;
+  oneof cloud {
+    AWSRegistration aws = 2;
+  }
+
+  message AWSRegistration {
+    string document = 1;
+    string signature = 2;
+  }
+}
+
+message RegisterMachineResponse {
+  string machine_id = 1;
+  string token = 2;
+  oneof task {
+    PendingTask pending = 3;
+    BuildKitTask buildkit = 4;
+  }
+
+  message Mount {
+    string path = 1;
+    string device = 2;
+    FilesystemType fs_type = 3;
+    optional CephVolume ceph_volume = 4;
+    optional string options = 5;
+
+    enum FilesystemType {
+      FILESYSTEM_TYPE_UNSPECIFIED = 0;
+      FILESYSTEM_TYPE_EXT4 = 1;
+      FILESYSTEM_TYPE_XFS = 2;
+      FILESYSTEM_TYPE_BTRFS = 3;
+    }
+
+    // rbd device map rbd/{volume_name}/{volume_name} --name {client_name} --keyring /etc/ceph/ceph.{client_name}.keyring
+    message CephVolume {
+      // Used as the namespace and image name.
+      string volume_name = 1;
+      // Includes `client.` prefix
+      string client_name = 2;
+      // Store securely. NOTE: this is not a keyring file but just a key.
+      string key = 3;
+      // Store at /etc/ceph/ceph.conf
+      string ceph_conf = 4;
+    }
+  }
+
+  // PendingTask represents an instruction to wait for a task to be assigned
+  message PendingTask {}
+
+  // BuildkitTask represents an instruction to start a buildkit daemon
+  message BuildKitTask {
+    string server_name = 1;
+    Cert cert = 2;
+    Cert ca_cert = 3;
+    repeated Mount mounts = 4;
+    int32 cache_size = 5;
+    optional string trace_endpoint = 6;
+    optional Profiler profiler = 7;
+    optional bool disable_parallel_gzip = 8;
+    optional bool run_gc_before_start = 9;
+    reserved 10;
+    optional bool enable_scheduler_debug = 11;
+    // Turns off merging feature of buildkit.  Attempting to help GDC.
+    optional bool disable_merge_to = 12;
+    int32 max_parallelism = 13;
+
+    // Disable fstrim on shutdown
+    optional bool disable_fstrim = 14;
+  }
+
+  // Specifies sending buildkit profiling data to a remote endpoint.
+  message Profiler {
+    string endpoint = 1;
+    string token = 2;
+    string project_id = 3;
+  }
+}
+
+message PingMachineHealthRequest {
+  string machine_id = 1;
+  repeated DiskSpace disks = 2;
+}
+
+message DiskSpace {
+  string device = 1;
+  string path = 2;
+  int64 free_mb = 3;
+  int64 total_mb = 4;
+  int64 free_inodes = 5;
+  int64 total_inodes = 6;
+}
+
+message PingMachineHealthResponse {
+  bool should_terminate = 1;
+}
+
+message Cert {
+  string cert = 1;
+  string key = 2;
+}
+
+message UsageRequest {
+  string machine_id = 1;
+  Cache cache = 2;
+}
+
+message Cache {
+  // Response is the output of the `buildkit du` command.
+  string buildkit_du_json = 1;
+}
+
+message UsageResponse {}
+
+message ReportStatusRequest {
+  string spiffe_id = 1;
+  moby.buildkit.v1.StatusResponse status = 2;
+  map<string, string> stable_digests = 3;
+}
+
+message ReportStatusResponse {}

@@ -2,6 +2,8 @@ package runc
 
 import (
 	"context"
+	"database/sql"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	ctdsnapshot "github.com/containerd/containerd/snapshots"
 	"github.com/docker/docker/pkg/idtools"
+	"github.com/go-sql-driver/mysql"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/executor/runcexecutor"
@@ -130,15 +133,36 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 	lm := leaseutil.WithNamespace(ctdmetadata.NewLeaseManager(mdb), "buildkit")
 	snap := containerdsnapshot.NewSnapshotter(snFactory.Name, mdb.Snapshotter(snFactory.Name), "buildkit", idmap)
 
-	md, err := metadata.NewStore(filepath.Join(root, "metadata_v2.db"))
-	if err != nil {
-		return opt, err
+	var store metadata.MetadataStore
+
+	if os.Getenv("DEPOY_USE_MYSQL") != "" {
+		dbcfg := mysql.Config{
+			User:                 "root",
+			Passwd:               "",
+			Net:                  "tcp",
+			Addr:                 "127.0.0.1:3306",
+			DBName:               "bk",
+			AllowNativePasswords: true,
+			ParseTime:            true,
+		}
+		// Get a database handle.
+		db, err := sql.Open("mysql", dbcfg.FormatDSN())
+		if err != nil {
+			log.Fatal(err)
+		}
+		store = &metadata.MyStore{DB: db}
+	} else {
+		md, err := metadata.NewStore(filepath.Join(root, "metadata_v2.db"))
+		if err != nil {
+			return opt, err
+		}
+		store = md
 	}
 
 	opt = base.WorkerOpt{
 		ID:               id,
 		Labels:           xlabels,
-		MetadataStore:    md,
+		MetadataStore:    store,
 		NetworkProviders: np,
 		Executor:         exe,
 		Snapshotter:      snap,

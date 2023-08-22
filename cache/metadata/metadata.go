@@ -85,8 +85,28 @@ type MyStore struct {
 	Store *Store
 }
 
+func CreateTables(db *sql.DB) error {
+	_, err := db.Exec("CREATE TABLE IF NOT EXISTS main (id VARCHAR(255), keyName VARCHAR(255), value JSON, PRIMARY KEY (id, keyName))")
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS external (id VARCHAR(255), keyName VARCHAR(255), value BLOB, PRIMARY KEY (id, keyName))")
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS mainIndex (id VARCHAR(255), keyName VARCHAR(255), PRIMARY KEY (id, keyName))")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Close closes the store.
 func (s *MyStore) Close() error {
+	logrus.Info("closing store")
 	return s.DB.Close()
 }
 
@@ -96,6 +116,7 @@ func (s *MyStore) KeyIDs() ([]string, error) {
 }
 
 func selectAllIDs(db *sql.DB) ([]string, error) {
+	logrus.Info("loading all keys")
 	rows, err := db.Query("SELECT id FROM main")
 	if err != nil {
 		return nil, err
@@ -111,17 +132,20 @@ func selectAllIDs(db *sql.DB) ([]string, error) {
 		ids = append(ids, id)
 	}
 
+	logrus.Infof("loaded all keys %d", len(ids))
 	return ids, nil
 }
 
 // Checks if an id exists in the _main store.
 func (s *MyStore) Exists(id string) bool {
+	logrus.Infof("checking if %s exists", id)
 	exists, err := checkIfIDExists(s.DB, id)
 	if err != nil {
 		logrus.Errorf("failed to check if id exists: %v", err)
 		return false
 	}
 
+	logrus.Infof("exists %s %v", id, exists)
 	return exists
 }
 
@@ -137,6 +161,7 @@ func checkIfIDExists(db *sql.DB, id string) (bool, error) {
 
 // Search returns all the StorageItems that match the index.
 func (s *MyStore) Search(index string) ([]*StorageItem, error) {
+	logrus.Infof("searching for %s", index)
 	idValues, err := selectIDsWhereIndexJoinOnMain(s.DB, index)
 	if err != nil {
 		return nil, err
@@ -147,12 +172,13 @@ func (s *MyStore) Search(index string) ([]*StorageItem, error) {
 		items = append(items, NewStorageItemWithValues(id, s, values))
 	}
 
+	logrus.Infof("Search found %d", len(items))
 	return items, nil
 }
 
 // This selects all the ids and puts them in a map of id to all values.
 func selectIDsWhereIndexJoinOnMain(db *sql.DB, index string) (map[string]map[string]*Value, error) {
-	rows, err := db.Query("SELECT main.id, main.column, main.value FROM main INNER JOIN index ON main.id = index.id WHERE index.column = ?", index)
+	rows, err := db.Query("SELECT main.id, main.keyName, main.value FROM main INNER JOIN mainIndex ON main.id = mainIndex.id WHERE mainIndex.keyName = ?", index)
 	if err != nil {
 		return nil, err
 	}
@@ -161,9 +187,9 @@ func selectIDsWhereIndexJoinOnMain(db *sql.DB, index string) (map[string]map[str
 	idValues := make(map[string]map[string]*Value)
 	for rows.Next() {
 		var id string
-		var column string
+		var keyName string
 		var value []byte
-		if err := rows.Scan(&id, &column, &value); err != nil {
+		if err := rows.Scan(&id, &keyName, &value); err != nil {
 			return nil, err
 		}
 
@@ -176,7 +202,7 @@ func selectIDsWhereIndexJoinOnMain(db *sql.DB, index string) (map[string]map[str
 			idValues[id] = make(map[string]*Value)
 		}
 
-		idValues[id][column] = &v
+		idValues[id][keyName] = &v
 	}
 
 	return idValues, nil
@@ -184,6 +210,7 @@ func selectIDsWhereIndexJoinOnMain(db *sql.DB, index string) (map[string]map[str
 
 // Get returns a StorageItem and a bool indicating if it was found.
 func (s *MyStore) Get(id string) (*StorageItem, bool) {
+	logrus.Infof("getting %s", id)
 	values, err := selectValuesWhereID(s.DB, id)
 	if err != nil {
 		logrus.Errorf("failed to get values for id %s: %v", id, err)
@@ -191,14 +218,16 @@ func (s *MyStore) Get(id string) (*StorageItem, bool) {
 	}
 
 	if len(values) == 0 {
+		logrus.Infof("got empty %s", id)
 		return NewStorageItem(id, s), false
 	}
 
+	logrus.WithField("values", values).Infof("got %s", id)
 	return NewStorageItemWithValues(id, s, values), true
 }
 
 func selectValuesWhereID(db *sql.DB, id string) (map[string]*Value, error) {
-	rows, err := db.Query("SELECT column, value FROM main WHERE id = ?", id)
+	rows, err := db.Query("SELECT keyName, value FROM main WHERE id = ?", id)
 	if err != nil {
 		return nil, err
 	}
@@ -206,9 +235,9 @@ func selectValuesWhereID(db *sql.DB, id string) (map[string]*Value, error) {
 
 	values := make(map[string]*Value)
 	for rows.Next() {
-		var column string
+		var keyName string
 		var value []byte
-		if err := rows.Scan(&column, &value); err != nil {
+		if err := rows.Scan(&keyName, &value); err != nil {
 			return nil, err
 		}
 
@@ -217,7 +246,7 @@ func selectValuesWhereID(db *sql.DB, id string) (map[string]*Value, error) {
 			return nil, err
 		}
 
-		values[column] = &v
+		values[keyName] = &v
 	}
 
 	return values, nil
@@ -225,9 +254,10 @@ func selectValuesWhereID(db *sql.DB, id string) (map[string]*Value, error) {
 
 // SetValues sets the values for the StorageItem.  This overwrites any existing values.
 func (s *MyStore) SetValues(values []VVVVV) error {
+	logrus.Infof("setting values %+#v", values)
 	for _, v := range values {
 		if v.Bucket == Index {
-			err := updateOrInsertIndex(s.DB, v.ID, v.Column)
+			err := updateOrInsertIndex(s.DB, v.ID, v.KeyName)
 			if err != nil {
 				return err
 			}
@@ -235,7 +265,7 @@ func (s *MyStore) SetValues(values []VVVVV) error {
 		}
 
 		// TODO: rewrite into single insert
-		err := updateOrInsert(s.DB, v.Bucket, v.ID, v.Column, v.Value)
+		err := updateOrInsert(s.DB, v.Bucket, v.ID, v.KeyName, v.Value)
 		if err != nil {
 			return err
 		}
@@ -245,19 +275,19 @@ func (s *MyStore) SetValues(values []VVVVV) error {
 }
 
 func updateOrInsertIndex(db *sql.DB, id string, key string) error {
-	_, err := db.Exec("INSERT INTO index (id, column) VALUES (?, ?) ON DUPLICATE KEY UPDATE column=?", id, key)
+	_, err := db.Exec("INSERT INTO mainIndex (id, keyName) VALUES (?, ?) ON DUPLICATE KEY UPDATE keyName=?", id, key, key)
 	return err
 }
 
 func updateOrInsert(db *sql.DB, bucket Bucket, id string, key string, value []byte) error {
-	_, err := db.Exec("INSERT INTO ? (id, column, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE column=?", bucket.Table(), id, key, value, key)
+	_, err := db.Exec("INSERT INTO "+bucket.Table()+" (id, keyName, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE keyName=?, value=?", id, key, value, key, value)
 	return err
 }
 
-func updateOrInsertMultiple(db *sql.DB, bucket Bucket, id string, values []VVVVV) {
-	// Insert all the values
-	// TODO:
-}
+//func updateOrInsertMultiple(db *sql.DB, bucket Bucket, id string, values []VVVVV) {
+// Insert all the values
+// TODO:
+//}
 
 // GetExternal returns the value for the key in the _external store.
 func (s *MyStore) GetExternal(id string, key string) ([]byte, error) {
@@ -265,8 +295,9 @@ func (s *MyStore) GetExternal(id string, key string) ([]byte, error) {
 }
 
 func selectFromExternal(db *sql.DB, id string, key string) ([]byte, error) {
+	logrus.Infof("getting external %s %s", id, key)
 	var value []byte
-	err := db.QueryRow("SELECT value FROM external WHERE id = ? AND column = ?", id, key).Scan(&value)
+	err := db.QueryRow("SELECT value FROM external WHERE id = ? AND keyName = ?", id, key).Scan(&value)
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +307,7 @@ func selectFromExternal(db *sql.DB, id string, key string) ([]byte, error) {
 
 // Delete removes the StorageItem from the _main, _external and _index stores.
 func (s *MyStore) Delete(id string) error {
+	logrus.Infof("deleting %s", id)
 	var rerr error
 	err := deleteIDFromMain(s.DB, id)
 	if err != nil {
@@ -297,7 +329,7 @@ func deleteIDFromMain(db *sql.DB, id string) error {
 }
 
 func deleteIDFromIndex(db *sql.DB, id string) error {
-	_, err := db.Exec("DELETE FROM index WHERE id = ?", id)
+	_, err := db.Exec("DELETE FROM mainIndex WHERE id = ?", id)
 	return err
 }
 
@@ -308,17 +340,19 @@ func deleteIDFromExternal(db *sql.DB, id string) error {
 
 // ClearValue sets the value of the key to nil keeping the key.
 func (s *MyStore) ClearValue(id string, bucket Bucket, key string) error {
+	logrus.Infof("clearing value %s %s %s", id, bucket, key)
 	return updateKeyToNullWhereID(s.DB, id, bucket, key)
 }
 
 func updateKeyToNullWhereID(db *sql.DB, id string, bucket Bucket, key string) error {
-	_, err := db.Exec("UPDATE ? SET value = NULL WHERE id = ? AND column = ?", bucket.Table(), id, key)
+	_, err := db.Exec("UPDATE "+bucket.Table()+" SET value = NULL WHERE id = ? AND keyName = ?", id, key)
 	return err
 
 }
 
 // ClearValue sets the value of the key to nil keeping the key.  Also deletes the index if the value has an index.
 func (s *MyStore) ClearIndexedValue(id string, bucket Bucket, _ string, key string) error {
+	logrus.Infof("clearing indexed value %s %s %s", id, bucket, key)
 	// MySQL has indexing built in.  So we don't need to do anything special here as we do with bolt.
 	err := deleteIDFromIndex(s.DB, id)
 	if err != nil {
@@ -333,36 +367,36 @@ type Store struct {
 }
 
 type VVVVV struct {
-	Bucket Bucket
-	ID     string
-	Column string
-	Value  []byte
+	Bucket  Bucket
+	ID      string
+	KeyName string
+	Value   []byte
 }
 
 func NewIndexVVVV(id, index string) VVVVV {
 	return VVVVV{
-		Bucket: Index,
-		ID:     id,
-		Column: index,
-		Value:  nil, // Ignored for indexes
+		Bucket:  Index,
+		ID:      id,
+		KeyName: index,
+		Value:   nil, // Ignored for indexes
 	}
 }
 
-func NewVVVV(id, column string, value []byte) VVVVV {
+func NewVVVV(id, keyName string, value []byte) VVVVV {
 	return VVVVV{
-		Bucket: Main,
-		ID:     id,
-		Column: column,
-		Value:  value,
+		Bucket:  Main,
+		ID:      id,
+		KeyName: keyName,
+		Value:   value,
 	}
 }
 
-func NewExternalVVVV(id, column string, value []byte) VVVVV {
+func NewExternalVVVV(id, keyName string, value []byte) VVVVV {
 	return VVVVV{
-		Bucket: External,
-		ID:     id,
-		Column: column,
-		Value:  value,
+		Bucket:  External,
+		ID:      id,
+		KeyName: keyName,
+		Value:   value,
 	}
 }
 
@@ -503,7 +537,7 @@ func (s *Store) SetValues(values []VVVVV) error {
 			// scan until the prefix no longer matches.
 			if v.Bucket == Index {
 				bucket := tx.Bucket([]byte(v.Bucket.String()))
-				key := boltIndexKey(v.Column, v.ID)
+				key := boltIndexKey(v.KeyName, v.ID)
 				return bucket.Put([]byte(key), []byte{})
 			}
 
@@ -512,7 +546,7 @@ func (s *Store) SetValues(values []VVVVV) error {
 			if err != nil {
 				return errors.WithStack(err)
 			}
-			err = idBucket.Put([]byte(v.Column), v.Value)
+			err = idBucket.Put([]byte(v.KeyName), v.Value)
 			if err != nil {
 				return errors.WithStack(err)
 			}

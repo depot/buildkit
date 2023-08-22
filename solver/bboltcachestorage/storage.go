@@ -237,10 +237,12 @@ func (s *MyKeyStorage) Release(resultID string) error {
 	return s.Store.Release(resultID)
 }
 
+/*
 func deleteReleaseID(db *sql.DB, id string) error {
 	_, err := db.Exec("DELETE FROM result WHERE result_id = ?", id)
 	return err
 }
+*/
 
 // TODO: This is only used in one place.  If the id does not match a key It just wants the entire list of IDs.
 func (s *MyKeyStorage) WalkIDsByResult(resultID string, fn func(string) error) error {

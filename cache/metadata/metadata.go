@@ -280,8 +280,15 @@ func updateOrInsertIndex(db *sql.DB, id string, key string) error {
 }
 
 func updateOrInsert(db *sql.DB, bucket Bucket, id string, key string, value []byte) error {
-	_, err := db.Exec("INSERT INTO "+bucket.Table()+" (id, keyName, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE keyName=?, value=?", id, key, value, key, value)
-	return err
+	if bucket == External {
+		_, err := db.Exec("INSERT INTO external (id, keyName, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE keyName=?, value=?", id, key, value, key, value)
+		return err
+	} else if bucket == Main {
+		_, err := db.Exec("INSERT INTO main (id, keyName, value) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE keyName=?, value=?", id, key, value, key, value)
+		return err
+	}
+
+	return nil
 }
 
 //func updateOrInsertMultiple(db *sql.DB, bucket Bucket, id string, values []VVVVV) {
@@ -317,7 +324,6 @@ func (s *MyStore) Delete(id string) error {
 	err = deleteIDFromExternal(s.DB, id)
 	if err != nil {
 		rerr = multierror.Append(rerr, err)
-		return err
 	}
 
 	return rerr
@@ -345,9 +351,15 @@ func (s *MyStore) ClearValue(id string, bucket Bucket, key string) error {
 }
 
 func updateKeyToNullWhereID(db *sql.DB, id string, bucket Bucket, key string) error {
-	_, err := db.Exec("UPDATE "+bucket.Table()+" SET value = NULL WHERE id = ? AND keyName = ?", id, key)
-	return err
+	if bucket == External {
+		_, err := db.Exec("UPDATE external SET value = NULL WHERE id = ? AND keyName = ?", id, key)
+		return err
+	} else if bucket == Main {
+		_, err := db.Exec("UPDATE main SET value = NULL WHERE id = ? AND keyName = ?", id, key)
+		return err
+	}
 
+	return nil
 }
 
 // ClearValue sets the value of the key to nil keeping the key.  Also deletes the index if the value has an index.
@@ -671,8 +683,8 @@ func (s *Store) load(id string) (map[string]*Value, error) {
 			return nil
 		})
 	})
-	return out, errors.WithStack(err)
 
+	return out, errors.WithStack(err)
 }
 
 func (s *Store) Exists(id string) bool {

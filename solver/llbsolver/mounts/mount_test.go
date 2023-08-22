@@ -113,9 +113,6 @@ func newCacheManager(ctx context.Context, t *testing.T, opt cmOpt) (co *cmOut, e
 	if err != nil {
 		return nil, err
 	}
-	t.Cleanup(func() {
-		require.NoError(t, cm.Close())
-	})
 
 	return &cmOut{
 		manager: cm,

@@ -755,9 +755,9 @@ type cacheRefMetadata struct {
 }
 
 func (md cacheRefMetadata) setGitSnapshot(key string) error {
-	return md.SetString(keyGitSnapshot, key, gitSnapshotIndex+key)
+	return md.SetIndexedString(keyGitSnapshot, key, gitSnapshotIndex+key)
 }
 
 func (md cacheRefMetadata) setGitRemote(key string) error {
-	return md.SetString(keyGitRemote, key, gitRemoteIndex+key)
+	return md.SetIndexedString(keyGitRemote, key, gitRemoteIndex+key)
 }

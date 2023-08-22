@@ -9,7 +9,6 @@ import (
 	"github.com/moby/buildkit/util/bklog"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	bolt "go.etcd.io/bbolt"
 )
 
 const sizeUnknown int64 = -1
@@ -67,16 +66,19 @@ type RefMetadata interface {
 	GetRecordType() client.UsageRecordType
 	SetRecordType(client.UsageRecordType) error
 
+	// GetEqualMutable returns a "shallow" RefMetadata that only includes ID.
+	// It only supports Get/Set External
 	GetEqualMutable() (RefMetadata, bool)
 
 	// generic getters/setters for external packages
 	GetString(string) string
-	SetString(key, val, index string) error
+	SetString(key, val string) error
+	SetIndexedString(key, val, index string) error
 
 	GetExternal(string) ([]byte, error)
 	SetExternal(string, []byte) error
 
-	ClearValueAndIndex(string, string) error
+	ClearValueAndIndex(string) error
 }
 
 func (cm *cacheManager) Search(ctx context.Context, idx string) ([]RefMetadata, error) {
@@ -113,22 +115,13 @@ func (cm *cacheManager) getMetadata(id string) (*cacheMetadata, bool) {
 		return rec.cacheMetadata, true
 	}
 	si, ok := cm.MetadataStore.Get(id)
-	md := &cacheMetadata{si}
+	md := &cacheMetadata{si: si, store: cm.MetadataStore}
 	return md, ok
 }
 
-// callers must hold cm.mu lock
-func (cm *cacheManager) searchBlobchain(ctx context.Context, id digest.Digest) ([]RefMetadata, error) {
-	return cm.search(ctx, blobchainIndex+id.String())
-}
-
-// callers must hold cm.mu lock
-func (cm *cacheManager) searchChain(ctx context.Context, id digest.Digest) ([]RefMetadata, error) {
-	return cm.search(ctx, chainIndex+id.String())
-}
-
 type cacheMetadata struct {
-	si *metadata.StorageItem
+	si    *metadata.StorageItem
+	store metadata.MetadataStore
 }
 
 func (md *cacheMetadata) ID() string {
@@ -144,15 +137,15 @@ func (md *cacheMetadata) GetDescription() string {
 }
 
 func (md *cacheMetadata) SetDescription(descr string) error {
-	return md.setValue(keyDescription, descr, "")
+	return md.SetValue(keyDescription, descr)
 }
 
 func (md *cacheMetadata) queueDescription(descr string) error {
-	return md.queueValue(keyDescription, descr, "")
+	return md.queueValue(keyDescription, descr)
 }
 
 func (md *cacheMetadata) queueCommitted(b bool) error {
-	return md.queueValue(keyCommitted, b, "")
+	return md.queueValue(keyCommitted, b)
 }
 
 func (md *cacheMetadata) getCommitted() bool {
@@ -164,7 +157,7 @@ func (md *cacheMetadata) GetLayerType() string {
 }
 
 func (md *cacheMetadata) SetLayerType(value string) error {
-	return md.setValue(keyLayerType, value, "")
+	return md.SetValue(keyLayerType, value)
 }
 
 func (md *cacheMetadata) GetRecordType() client.UsageRecordType {
@@ -172,19 +165,19 @@ func (md *cacheMetadata) GetRecordType() client.UsageRecordType {
 }
 
 func (md *cacheMetadata) SetRecordType(value client.UsageRecordType) error {
-	return md.setValue(keyRecordType, value, "")
+	return md.SetValue(keyRecordType, value)
 }
 
 func (md *cacheMetadata) queueRecordType(value client.UsageRecordType) error {
-	return md.queueValue(keyRecordType, value, "")
+	return md.queueValue(keyRecordType, value)
 }
 
 func (md *cacheMetadata) SetCreatedAt(tm time.Time) error {
-	return md.setTime(keyCreatedAt, tm, "")
+	return md.setTime(keyCreatedAt, tm)
 }
 
 func (md *cacheMetadata) queueCreatedAt(tm time.Time) error {
-	return md.queueTime(keyCreatedAt, tm, "")
+	return md.queueTime(keyCreatedAt, tm)
 }
 
 func (md *cacheMetadata) GetCreatedAt() time.Time {
@@ -215,12 +208,18 @@ func (md *cacheMetadata) SetExternal(s string, dt []byte) error {
 	return md.si.SetExternal(s, dt)
 }
 
+// GetEqualMutable returns a shallow RefMetadata that only includes ID and none of the id's key/values.
 func (md *cacheMetadata) GetEqualMutable() (RefMetadata, bool) {
-	emSi, ok := md.si.Storage().Get(md.getEqualMutable())
+	id := md.getEqualMutable()
+	ok := md.store.Exists(id)
 	if !ok {
 		return nil, false
 	}
-	return &cacheMetadata{emSi}, true
+
+	return &cacheMetadata{
+		si:    metadata.NewStorageItem(id, md.store),
+		store: md.store,
+	}, true
 }
 
 func (md *cacheMetadata) getEqualMutable() string {
@@ -228,18 +227,16 @@ func (md *cacheMetadata) getEqualMutable() string {
 }
 
 func (md *cacheMetadata) setEqualMutable(s string) error {
-	return md.queueValue(keyEqualMutable, s, "")
+	return md.queueValue(keyEqualMutable, s)
 }
 
 func (md *cacheMetadata) clearEqualMutable() error {
-	md.si.Queue(func(b *bolt.Bucket) error {
-		return md.si.SetValue(b, keyEqualMutable, nil)
-	})
+	md.si.Queue(keyEqualMutable, nil)
 	return nil
 }
 
 func (md *cacheMetadata) queueDiffID(str digest.Digest) error {
-	return md.queueValue(keyDiffID, str, "")
+	return md.queueValue(keyDiffID, str)
 }
 
 func (md *cacheMetadata) getMediaType() string {
@@ -247,7 +244,7 @@ func (md *cacheMetadata) getMediaType() string {
 }
 
 func (md *cacheMetadata) queueMediaType(str string) error {
-	return md.queueValue(keyMediaType, str, "")
+	return md.queueValue(keyMediaType, str)
 }
 
 func (md *cacheMetadata) getSnapshotID() string {
@@ -261,7 +258,7 @@ func (md *cacheMetadata) getSnapshotID() string {
 }
 
 func (md *cacheMetadata) queueSnapshotID(str string) error {
-	return md.queueValue(keySnapshot, str, "")
+	return md.queueValue(keySnapshot, str)
 }
 
 func (md *cacheMetadata) getDiffID() digest.Digest {
@@ -269,7 +266,7 @@ func (md *cacheMetadata) getDiffID() digest.Digest {
 }
 
 func (md *cacheMetadata) queueChainID(str digest.Digest) error {
-	return md.queueValue(keyChainID, str, chainIndex+str.String())
+	return md.queueIndexedValue(keyChainID, str, chainIndex+str.String())
 }
 
 func (md *cacheMetadata) getBlobChainID() digest.Digest {
@@ -277,7 +274,7 @@ func (md *cacheMetadata) getBlobChainID() digest.Digest {
 }
 
 func (md *cacheMetadata) queueBlobChainID(str digest.Digest) error {
-	return md.queueValue(keyBlobChainID, str, blobchainIndex+str.String())
+	return md.queueIndexedValue(keyBlobChainID, str, blobchainIndex+str.String())
 }
 
 func (md *cacheMetadata) getChainID() digest.Digest {
@@ -285,7 +282,7 @@ func (md *cacheMetadata) getChainID() digest.Digest {
 }
 
 func (md *cacheMetadata) queueBlob(str digest.Digest) error {
-	return md.queueValue(keyBlob, str, "")
+	return md.queueValue(keyBlob, str)
 }
 
 func (md *cacheMetadata) appendURLs(urls []string) error {
@@ -304,7 +301,7 @@ func (md *cacheMetadata) getBlob() digest.Digest {
 }
 
 func (md *cacheMetadata) queueBlobOnly(b bool) error {
-	return md.queueValue(keyBlobOnly, b, "")
+	return md.queueValue(keyBlobOnly, b)
 }
 
 func (md *cacheMetadata) getBlobOnly() bool {
@@ -312,7 +309,7 @@ func (md *cacheMetadata) getBlobOnly() bool {
 }
 
 func (md *cacheMetadata) queueDeleted() error {
-	return md.queueValue(keyDeleted, true, "")
+	return md.queueValue(keyDeleted, true)
 }
 
 func (md *cacheMetadata) getDeleted() bool {
@@ -320,7 +317,7 @@ func (md *cacheMetadata) getDeleted() bool {
 }
 
 func (md *cacheMetadata) queueParent(parent string) error {
-	return md.queueValue(keyParent, parent, "")
+	return md.queueValue(keyParent, parent)
 }
 
 func (md *cacheMetadata) getParent() string {
@@ -328,7 +325,7 @@ func (md *cacheMetadata) getParent() string {
 }
 
 func (md *cacheMetadata) queueMergeParents(parents []string) error {
-	return md.queueValue(keyMergeParents, parents, "")
+	return md.queueValue(keyMergeParents, parents)
 }
 
 func (md *cacheMetadata) getMergeParents() []string {
@@ -336,7 +333,7 @@ func (md *cacheMetadata) getMergeParents() []string {
 }
 
 func (md *cacheMetadata) queueLowerDiffParent(parent string) error {
-	return md.queueValue(keyLowerDiffParent, parent, "")
+	return md.queueValue(keyLowerDiffParent, parent)
 }
 
 func (md *cacheMetadata) getLowerDiffParent() string {
@@ -344,7 +341,7 @@ func (md *cacheMetadata) getLowerDiffParent() string {
 }
 
 func (md *cacheMetadata) queueUpperDiffParent(parent string) error {
-	return md.queueValue(keyUpperDiffParent, parent, "")
+	return md.queueValue(keyUpperDiffParent, parent)
 }
 
 func (md *cacheMetadata) getUpperDiffParent() string {
@@ -352,7 +349,7 @@ func (md *cacheMetadata) getUpperDiffParent() string {
 }
 
 func (md *cacheMetadata) queueSize(s int64) error {
-	return md.queueValue(keySize, s, "")
+	return md.queueValue(keySize, s)
 }
 
 func (md *cacheMetadata) getSize() int64 {
@@ -371,7 +368,7 @@ func (md *cacheMetadata) getImageRefs() []string {
 }
 
 func (md *cacheMetadata) queueBlobSize(s int64) error {
-	return md.queueValue(keyBlobSize, s, "")
+	return md.queueValue(keyBlobSize, s)
 }
 
 func (md *cacheMetadata) getBlobSize() int64 {
@@ -382,7 +379,7 @@ func (md *cacheMetadata) getBlobSize() int64 {
 }
 
 func (md *cacheMetadata) setCachePolicy(p cachePolicy) error {
-	return md.setValue(keyCachePolicy, p, "")
+	return md.SetValue(keyCachePolicy, p)
 }
 
 func (md *cacheMetadata) getCachePolicy() cachePolicy {
@@ -417,61 +414,61 @@ func (md *cacheMetadata) updateLastUsed() error {
 	count, _ := md.getLastUsed()
 	count++
 
-	v, err := metadata.NewValue(count)
+	err := md.queueValue(keyUsageCount, count)
 	if err != nil {
 		return errors.Wrap(err, "failed to create usageCount value")
 	}
-	v2, err := metadata.NewValue(time.Now().UnixNano())
+
+	err = md.queueValue(keyLastUsedAt, time.Now().UnixNano())
 	if err != nil {
 		return errors.Wrap(err, "failed to create lastUsedAt value")
 	}
-	return md.si.Update(func(b *bolt.Bucket) error {
-		if err := md.si.SetValue(b, keyUsageCount, v); err != nil {
-			return err
-		}
-		return md.si.SetValue(b, keyLastUsedAt, v2)
-	})
+
+	return md.commitMetadata()
 }
 
-func (md *cacheMetadata) queueValue(key string, value interface{}, index string) error {
+func (md *cacheMetadata) queueValue(key string, value interface{}) error {
 	v, err := metadata.NewValue(value)
 	if err != nil {
 		return errors.Wrap(err, "failed to create value")
 	}
-	v.Index = index
-	md.si.Queue(func(b *bolt.Bucket) error {
-		return md.si.SetValue(b, key, v)
-	})
+	md.si.Queue(key, v)
 	return nil
 }
 
-func (md *cacheMetadata) SetString(key, value string, index string) error {
-	return md.setValue(key, value, index)
-}
-
-func (md *cacheMetadata) setValue(key string, value interface{}, index string) error {
+func (md *cacheMetadata) queueIndexedValue(key string, value interface{}, index string) error {
 	v, err := metadata.NewValue(value)
 	if err != nil {
 		return errors.Wrap(err, "failed to create value")
 	}
 	v.Index = index
-	return md.si.Update(func(b *bolt.Bucket) error {
-		return md.si.SetValue(b, key, v)
-	})
+	md.si.Queue(key, v)
+	return nil
 }
 
-func (md *cacheMetadata) ClearValueAndIndex(key string, index string) error {
-	currentVal := md.GetString(key)
-	return md.si.Update(func(b *bolt.Bucket) error {
-		if err := md.si.SetValue(b, key, nil); err != nil {
-			return err
-		}
-		if currentVal != "" {
-			// force clearing index, see #1836 https://github.com/moby/buildkit/pull/1836
-			return md.si.ClearIndex(b.Tx(), index+currentVal)
-		}
-		return nil
-	})
+func (md *cacheMetadata) SetString(key, value string) error {
+	return md.SetValue(key, value)
+}
+
+func (md *cacheMetadata) SetIndexedString(key, value string, index string) error {
+	v, err := metadata.NewValue(value)
+	if err != nil {
+		return errors.Wrap(err, "failed to create value")
+	}
+	v.Index = index
+	return md.si.Set(key, v)
+}
+
+func (md *cacheMetadata) SetValue(key string, value interface{}) error {
+	v, err := metadata.NewValue(value)
+	if err != nil {
+		return errors.Wrap(err, "failed to create value")
+	}
+	return md.si.Set(key, v)
+}
+
+func (md *cacheMetadata) ClearValueAndIndex(key string) error {
+	return md.si.ClearValue(key)
 }
 
 func (md *cacheMetadata) GetString(key string) string {
@@ -498,12 +495,12 @@ func (md *cacheMetadata) GetStringSlice(key string) []string {
 	return val
 }
 
-func (md *cacheMetadata) setTime(key string, value time.Time, index string) error {
-	return md.setValue(key, value.UnixNano(), index)
+func (md *cacheMetadata) setTime(key string, value time.Time) error {
+	return md.SetValue(key, value.UnixNano())
 }
 
-func (md *cacheMetadata) queueTime(key string, value time.Time, index string) error {
-	return md.queueValue(key, value.UnixNano(), index)
+func (md *cacheMetadata) queueTime(key string, value time.Time) error {
+	return md.queueValue(key, value.UnixNano())
 }
 
 func (md *cacheMetadata) getTime(key string) time.Time {
@@ -542,37 +539,9 @@ func (md *cacheMetadata) getInt64(key string) (int64, bool) {
 	return i, true
 }
 
+// TODO: move this into the db as a helper.  This is so we don't need to pass functions around.
 func (md *cacheMetadata) appendStringSlice(key string, values ...string) error {
-	return md.si.GetAndSetValue(key, func(v *metadata.Value) (*metadata.Value, error) {
-		var slice []string
-		if v != nil {
-			if err := v.Unmarshal(&slice); err != nil {
-				return nil, err
-			}
-		}
-
-		idx := make(map[string]struct{}, len(values))
-		for _, v := range values {
-			idx[v] = struct{}{}
-		}
-
-		for _, existing := range slice {
-			delete(idx, existing)
-		}
-
-		if len(idx) == 0 {
-			return nil, metadata.ErrSkipSetValue
-		}
-
-		for value := range idx {
-			slice = append(slice, value)
-		}
-		v, err := metadata.NewValue(slice)
-		if err != nil {
-			return nil, err
-		}
-		return v, nil
-	})
+	return md.si.AppendStrings(key, values)
 }
 
 func (md *cacheMetadata) getStringSlice(key string) []string {

@@ -1211,7 +1211,6 @@ func setupCacheManager(t *testing.T, tmpdir string, snapshotterName string, snap
 	return cm, func() {
 		db.Close()
 		md.Close()
-		cm.Close()
 	}
 }
 

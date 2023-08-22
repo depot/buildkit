@@ -45,7 +45,7 @@ type ManagerOpt struct {
 	GarbageCollect  func(ctx context.Context) (gc.Stats, error)
 	Applier         diff.Applier
 	Differ          diff.Comparer
-	MetadataStore   *metadata.Store
+	MetadataStore   metadata.MetadataStore
 	MountPoolRoot   string
 }
 
@@ -70,7 +70,6 @@ type Controller interface {
 type Manager interface {
 	Accessor
 	Controller
-	Close() error
 }
 
 type ExternalRefCheckerFunc func() (ExternalRefChecker, error)
@@ -89,7 +88,7 @@ type cacheManager struct {
 	GarbageCollect  func(ctx context.Context) (gc.Stats, error)
 	Applier         diff.Applier
 	Differ          diff.Comparer
-	MetadataStore   *metadata.Store
+	MetadataStore   metadata.MetadataStore
 
 	mountPool sharableMountPool
 
@@ -173,7 +172,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	sis, err := cm.searchBlobchain(ctx, blobChainID)
+	sis, err := cm.search(ctx, blobchainIndex+blobChainID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +201,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 		return ref, nil
 	}
 
-	sis, err = cm.searchChain(ctx, chainID)
+	sis, err = cm.search(ctx, chainIndex+chainID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -312,16 +311,16 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 // init loads all snapshots from metadata state and tries to load the records
 // from the snapshotter. If snaphot can't be found, metadata is deleted as well.
 func (cm *cacheManager) init(ctx context.Context) error {
-	items, err := cm.MetadataStore.All()
+	keyIDs, err := cm.MetadataStore.KeyIDs()
 	if err != nil {
 		return err
 	}
 
-	for _, si := range items {
-		if _, err := cm.getRecord(ctx, si.ID()); err != nil {
-			logrus.Debugf("could not load snapshot %s: %+v", si.ID(), err)
-			cm.MetadataStore.Clear(si.ID())
-			cm.LeaseManager.Delete(ctx, leases.Lease{ID: si.ID()})
+	for _, id := range keyIDs {
+		if _, err := cm.getRecord(ctx, id); err != nil {
+			logrus.Debugf("could not load snapshot %s: %+v", id, err)
+			cm.MetadataStore.Delete(id)
+			cm.LeaseManager.Delete(ctx, leases.Lease{ID: id})
 		}
 	}
 	return nil
@@ -330,13 +329,6 @@ func (cm *cacheManager) init(ctx context.Context) error {
 // IdentityMapping returns the userns remapping used for refs
 func (cm *cacheManager) IdentityMapping() *idtools.IdentityMapping {
 	return cm.Snapshotter.IdentityMapping()
-}
-
-// Close closes the manager and releases the metadata database lock. No other
-// method should be called after Close.
-func (cm *cacheManager) Close() error {
-	// TODO: allocate internal context and cancel it here
-	return cm.MetadataStore.Close()
 }
 
 // Get returns an immutable snapshot reference for ID
@@ -442,7 +434,7 @@ func (cm *cacheManager) getRecord(ctx context.Context, id string, opts ...RefOpt
 			// The equal mutable for this ref is not found, check to see if our snapshot exists
 			if _, statErr := cm.Snapshotter.Stat(ctx, md.getSnapshotID()); statErr != nil {
 				// this ref's snapshot also doesn't exist, just remove this record
-				cm.MetadataStore.Clear(id)
+				cm.MetadataStore.Delete(id)
 				return nil, errors.Wrap(errNotFound, id)
 			}
 			// Our snapshot exists, so there may have been a crash while finalizing this ref.

@@ -454,7 +454,7 @@ func (md cacheRefMetadata) getHTTPChecksum() digest.Digest {
 }
 
 func (md cacheRefMetadata) setHTTPChecksum(urlDgst digest.Digest, d digest.Digest) error {
-	return md.SetString(keyHTTPChecksum, d.String(), urlDgst.String())
+	return md.SetIndexedString(keyHTTPChecksum, d.String(), urlDgst.String())
 }
 
 func (md cacheRefMetadata) getETag() string {
@@ -462,7 +462,7 @@ func (md cacheRefMetadata) getETag() string {
 }
 
 func (md cacheRefMetadata) setETag(s string) error {
-	return md.SetString(keyETag, s, "")
+	return md.SetString(keyETag, s)
 }
 
 func (md cacheRefMetadata) getHTTPModTime() string {
@@ -470,7 +470,7 @@ func (md cacheRefMetadata) getHTTPModTime() string {
 }
 
 func (md cacheRefMetadata) setHTTPModTime(s string) error {
-	return md.SetString(keyModTime, s, "")
+	return md.SetString(keyModTime, s)
 }
 
 func etagValue(v string) string {

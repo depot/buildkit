@@ -531,9 +531,9 @@ type CacheRefMetadata struct {
 }
 
 func (md CacheRefMetadata) setCacheDirIndex(id string) error {
-	return md.SetString(keyCacheDir, id, cacheDirIndex+id)
+	return md.SetIndexedString(keyCacheDir, id, cacheDirIndex+id)
 }
 
 func (md CacheRefMetadata) ClearCacheDirIndex() error {
-	return md.ClearValueAndIndex(keyCacheDir, cacheDirIndex)
+	return md.ClearValueAndIndex(keyCacheDir)
 }

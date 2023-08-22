@@ -155,9 +155,6 @@ func newCacheManager(ctx context.Context, t *testing.T, opt cmOpt) (co *cmOut, c
 	if err != nil {
 		return nil, nil, err
 	}
-	defers = append(defers, func() error {
-		return cm.Close()
-	})
 
 	return &cmOut{
 		manager: cm,
@@ -315,9 +312,6 @@ func TestManager(t *testing.T) {
 	checkDiskUsage(ctx, t, cm, 0, 0)
 
 	require.Equal(t, len(buf.all), 2)
-
-	err = cm.Close()
-	require.NoError(t, err)
 
 	dirs, err := os.ReadDir(filepath.Join(tmpdir, "snapshots/snapshots"))
 	require.NoError(t, err)
@@ -1062,9 +1056,6 @@ func TestLazyCommit(t *testing.T) {
 	snap, err = active.Commit(ctx)
 	require.NoError(t, err)
 
-	err = cm.Close()
-	require.NoError(t, err)
-
 	cleanup()
 
 	// we can't close snapshotter and open it twice (especially, its internal bbolt store)
@@ -1090,9 +1081,6 @@ func TestLazyCommit(t *testing.T) {
 	require.Equal(t, true, errors.Is(err, errNotFound))
 
 	snap, err = active.Commit(ctx)
-	require.NoError(t, err)
-
-	err = cm.Close()
 	require.NoError(t, err)
 
 	cleanup()
@@ -2301,7 +2289,6 @@ func TestLoadHalfFinalizedRef(t *testing.T) {
 
 	require.NoError(t, iref.Release(ctx))
 
-	require.NoError(t, cm.Close())
 	cleanup()
 
 	co, cleanup, err = newCacheManager(ctx, t, cmOpt{
@@ -2433,7 +2420,6 @@ func TestLoadBrokenParents(t *testing.T) {
 	// set refB as deleted
 	require.NoError(t, refB.(*immutableRef).queueDeleted())
 	require.NoError(t, refB.(*immutableRef).commitMetadata())
-	require.NoError(t, cm.Close())
 	cleanup()
 
 	co, cleanup, err = newCacheManager(ctx, t, cmOpt{

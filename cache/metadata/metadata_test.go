@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	bolt "go.etcd.io/bbolt"
 )
 
 func TestGetSetSearch(t *testing.T) {
@@ -28,9 +27,7 @@ func TestGetSetSearch(t *testing.T) {
 	v, err = NewValue("foobar")
 	require.NoError(t, err)
 
-	si.Queue(func(b *bolt.Bucket) error {
-		return si.SetValue(b, "bar", v)
-	})
+	si.Queue("bar", v)
 
 	err = si.Commit()
 	require.NoError(t, err)
@@ -69,21 +66,21 @@ func TestGetSetSearch(t *testing.T) {
 	v, err = NewValue("foobar2")
 	require.NoError(t, err)
 
-	si.Queue(func(b *bolt.Bucket) error {
-		return si.SetValue(b, "bar2", v)
-	})
+	si.Queue("bar2", v)
 
 	err = si.Commit()
 	require.NoError(t, err)
 
-	sis, err := s.All()
+	ids, err := s.KeyIDs()
 	require.NoError(t, err)
-	require.Equal(t, 2, len(sis))
+	require.Equal(t, 2, len(ids))
 
-	require.Equal(t, "foo", sis[0].ID())
-	require.Equal(t, "foo2", sis[1].ID())
+	require.Equal(t, "foo", ids[0])
+	require.Equal(t, "foo2", ids[1])
 
-	v = sis[0].Get("bar")
+	si, ok = s.Get(ids[0])
+	require.True(t, ok)
+	v = si.Get("bar")
 	require.NotNil(t, v)
 
 	str = ""
@@ -92,14 +89,14 @@ func TestGetSetSearch(t *testing.T) {
 	require.Equal(t, "foobar", str)
 
 	// clear foo, check that only foo2 exists
-	err = s.Clear(sis[0].ID())
+	err = s.Delete(ids[0])
 	require.NoError(t, err)
 
-	sis, err = s.All()
+	ids, err = s.KeyIDs()
 	require.NoError(t, err)
-	require.Equal(t, 1, len(sis))
+	require.Equal(t, 1, len(ids))
 
-	require.Equal(t, "foo2", sis[0].ID())
+	require.Equal(t, "foo2", ids[0])
 
 	_, ok = s.Get("foo")
 	require.False(t, ok)
@@ -132,9 +129,7 @@ func TestIndexes(t *testing.T) {
 		require.NoError(t, err)
 		v.Index = tcase.index
 
-		si.Queue(func(b *bolt.Bucket) error {
-			return si.SetValue(b, tcase.value, v)
-		})
+		si.Queue(tcase.value, v)
 
 		err = si.Commit()
 		require.NoError(t, err)
@@ -153,7 +148,7 @@ func TestIndexes(t *testing.T) {
 
 	require.Equal(t, sis[0].ID(), "foo2")
 
-	err = s.Clear("foo1")
+	err = s.Delete("foo1")
 	require.NoError(t, err)
 
 	sis, err = s.Search("tag:baz")
@@ -195,7 +190,7 @@ func TestExternalData(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "data", string(dt))
 
-	err = s.Clear("foo")
+	err = s.Delete("foo")
 	require.NoError(t, err)
 
 	si, _ = s.Get("foo")

@@ -452,7 +452,7 @@ func (cr *cacheRecord) remove(ctx context.Context, removeSnapshot bool) error {
 			return errors.Wrapf(err, "failed to delete compression variant lease for %s", cr.ID())
 		}
 	}
-	if err := cr.cm.MetadataStore.Clear(cr.ID()); err != nil {
+	if err := cr.cm.MetadataStore.Delete(cr.ID()); err != nil {
 		return errors.Wrapf(err, "failed to delete metadata of %s", cr.ID())
 	}
 	if err := cr.parentRefs.release(ctx); err != nil {

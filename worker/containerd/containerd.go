@@ -11,7 +11,6 @@ import (
 	"github.com/containerd/containerd/gc"
 	"github.com/containerd/containerd/leases"
 	gogoptypes "github.com/gogo/protobuf/types"
-	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/executor/containerdexecutor"
 	"github.com/moby/buildkit/executor/oci"
@@ -115,17 +114,6 @@ func newContainerd(root string, client *containerd.Client, snapshotterName, ns s
 	}
 
 	snap := containerdsnapshot.NewSnapshotter(snapshotterName, client.SnapshotService(snapshotterName), ns, nil)
-
-	if err := cache.MigrateV2(
-		context.TODO(),
-		filepath.Join(root, "metadata.db"),
-		filepath.Join(root, "metadata_v2.db"),
-		cs,
-		snap,
-		lm,
-	); err != nil {
-		return base.WorkerOpt{}, err
-	}
 
 	md, err := metadata.NewStore(filepath.Join(root, "metadata_v2.db"))
 	if err != nil {

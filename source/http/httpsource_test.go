@@ -373,9 +373,6 @@ func newHTTPSource(t *testing.T) (source.Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	t.Cleanup(func() {
-		require.NoError(t, cm.Close())
-	})
 
 	return NewSource(Opt{
 		CacheAccessor: cm,

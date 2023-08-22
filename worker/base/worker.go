@@ -76,7 +76,7 @@ type WorkerOpt struct {
 	LeaseManager     leases.Manager
 	GarbageCollect   func(context.Context) (gc.Stats, error)
 	ParallelismSem   *semaphore.Weighted
-	MetadataStore    *metadata.Store
+	MetadataStore    metadata.MetadataStore
 	MountPoolRoot    string
 }
 
@@ -209,6 +209,10 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 
 func (w *Worker) Close() error {
 	var rerr error
+	if err := w.MetadataStore.Close(); err != nil {
+		rerr = multierror.Append(rerr, err)
+	}
+
 	for _, provider := range w.NetworkProviders {
 		if err := provider.Close(); err != nil {
 			rerr = multierror.Append(rerr, err)

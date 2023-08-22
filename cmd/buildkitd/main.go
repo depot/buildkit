@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/user"
@@ -21,6 +23,7 @@ import (
 	"github.com/containerd/containerd/sys"
 	sddaemon "github.com/coreos/go-systemd/v22/daemon"
 	"github.com/docker/docker/pkg/reexec"
+	"github.com/go-sql-driver/mysql"
 	"github.com/gofrs/flock"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/moby/buildkit/cache/remotecache"
@@ -40,6 +43,7 @@ import (
 	"github.com/moby/buildkit/frontend/gateway"
 	"github.com/moby/buildkit/frontend/gateway/forwarder"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/bboltcachestorage"
 	"github.com/moby/buildkit/util/apicaps"
 	"github.com/moby/buildkit/util/appcontext"
@@ -663,9 +667,31 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 	frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(wc, dockerfile.Build)
 	frontends["gateway.v0"] = gateway.NewGatewayFrontend(wc)
 
-	cacheStorage, err := bboltcachestorage.NewStore(filepath.Join(cfg.Root, "cache.db"))
+	boltCacheStorage, err := bboltcachestorage.NewStore(filepath.Join(cfg.Root, "cache.db"))
 	if err != nil {
 		return nil, err
+	}
+
+	var cacheStorage solver.CacheKeyStorage
+	if os.Getenv("DEPOY_USE_MYSQL") != "" {
+		dbcfg := mysql.Config{
+			User:                 "root",
+			Passwd:               "",
+			Net:                  "tcp",
+			Addr:                 "127.0.0.1:3306",
+			DBName:               "bk",
+			AllowNativePasswords: true,
+			ParseTime:            true,
+		}
+		// Get a database handle.
+		db, err := sql.Open("mysql", dbcfg.FormatDSN())
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		cacheStorage = &bboltcachestorage.MyKeyStorage{DB: db, Store: boltCacheStorage}
+	} else {
+		cacheStorage = boltCacheStorage
 	}
 
 	historyDB, err := bbolt.Open(filepath.Join(cfg.Root, "history.db"), 0600, nil)

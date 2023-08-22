@@ -304,5 +304,5 @@ func (md cacheRefMetadata) getSharedKey() string {
 }
 
 func (md cacheRefMetadata) setSharedKey(key string) error {
-	return md.SetString(keySharedKey, key, sharedKeyIndex+key)
+	return md.SetIndexedString(keySharedKey, key, sharedKeyIndex+key)
 }

@@ -2,13 +2,19 @@ package bboltcachestorage
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/moby/buildkit/solver"
+	"github.com/moby/buildkit/util/bklog"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 	bolt "go.etcd.io/bbolt"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -17,6 +23,419 @@ const (
 	byResultBucket  = "_byresult"
 	backlinksBucket = "_backlinks"
 )
+
+type MyKeyStorage struct {
+	DB    *sql.DB
+	Store *Store
+}
+
+// TODO: used once in cachemanager.Query
+func (s *MyKeyStorage) Exists(id string) bool {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.Exists(%s)", id)
+	boltexists := s.Store.Exists(id)
+	dbexists := linkIDExists(s.DB, id)
+	if boltexists != dbexists {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.Exists(%s) boltexists != dbexists: %v != %v", id, boltexists, dbexists)
+	}
+
+	return boltexists
+}
+
+func linkIDExists(db *sql.DB, id string) bool {
+	var v bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM link WHERE link_id = ?)", id).Scan(&v)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("linkIDExists(%s) failed: %v", id, err)
+	}
+	return v
+}
+
+// Only ever used in ReleaseUnreferenced.
+func (s *MyKeyStorage) Walk(fn func(id string) error) error {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.Walk()")
+	boltids := []string{}
+	err := s.Store.Walk(func(id string) error {
+		boltids = append(boltids, id)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, id := range boltids {
+		err := fn(id)
+		if err != nil {
+			return err
+		}
+	}
+
+	ids, err := selectDistinctLinkIDs(s.DB)
+	if err != nil {
+		return err
+	}
+	sort.Strings(boltids)
+	sort.Strings(ids)
+	if !slices.Equal(boltids, ids) {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.Walk boltids != ids: %v != %v", boltids, ids)
+	}
+
+	return nil
+}
+
+func selectDistinctLinkIDs(db *sql.DB) ([]string, error) {
+	var ids []string
+	rows, err := db.Query("SELECT DISTINCT link_id FROM link")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		err := rows.Scan(&id)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// TODO: Three calls
+// 1. It is called from Walk in ReleaseUnreferenced.  For each id of the walk if it is not in the set of results then release from backend.
+// 2. In Records it gets all CacheRecords if it exists in results, otherwise it releases them. Looks like opportunistic cleanup.
+// 3. filterResults just lists the cache results.
+func (s *MyKeyStorage) WalkResults(id string, fn func(solver.CacheResult) error) error {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.WalkResults(%s)", id)
+	boltresults := []solver.CacheResult{}
+	err := s.Store.WalkResults(id, func(res solver.CacheResult) error {
+		boltresults = append(boltresults, res)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, res := range boltresults {
+		err := fn(res)
+		if err != nil {
+			return err
+		}
+	}
+
+	results, err := selectAllCacheResultWhereStoreID(s.DB, id)
+	if err != nil {
+		return err
+	}
+
+	sort.Slice(boltresults, func(i, j int) bool {
+		return boltresults[i].ID < boltresults[j].ID
+	})
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].ID < results[j].ID
+	})
+
+	if len(boltresults) != len(results) {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkResults(%s) len(boltresults) != len(results): %v != %v", id, len(boltresults), len(results))
+		for i := range boltresults {
+			bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkResults(%s) boltresults[i].ID: %v", id, boltresults[i].ID)
+		}
+		for i := range results {
+			bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkResults(%s) results[i].ID: %v", id, results[i].ID)
+		}
+	}
+
+	for i := range boltresults {
+		if boltresults[i].ID != results[i].ID {
+			bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkResults(%s) boltresults[i].ID != results[i].ID: %v != %v", id, boltresults[i].ID, results[i].ID)
+		}
+
+		if boltresults[i].CreatedAt.UTC().Round(time.Microsecond) != results[i].CreatedAt.UTC() {
+			bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkResults(%s) boltresults[i].CreatedAt != results[i].CreatedAt: %v != %v", id, boltresults[i].CreatedAt.UTC().Round(time.Microsecond), results[i].CreatedAt.UTC())
+		}
+	}
+
+	return s.Store.WalkResults(id, fn)
+}
+
+func selectAllCacheResultWhereStoreID(db *sql.DB, storeID string) ([]solver.CacheResult, error) {
+	var results []solver.CacheResult
+	rows, err := db.Query("SELECT created_at, result_id FROM result WHERE store_id = ?", storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var res solver.CacheResult
+		err := rows.Scan(&res.CreatedAt, &res.ID)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, res)
+	}
+	return results, nil
+}
+
+func (s *MyKeyStorage) Load(id string, resultID string) (solver.CacheResult, error) {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.Load(%s, %s)", id, resultID)
+
+	boltres, err := s.Store.Load(id, resultID)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.Load(%s, %s) failed: %v", id, resultID, err)
+	}
+
+	res, err := selectCacheResultWhereStoreIDAndResultID(s.DB, id, resultID)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.Load(%s, %s) failed: %v", id, resultID, err)
+	}
+
+	if boltres.ID != res.ID {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.Load(%s, %s) boltres.ID != res.ID: %v != %v", id, resultID, boltres.ID, res.ID)
+	}
+	if boltres.CreatedAt.UTC().Round(time.Microsecond) != res.CreatedAt.UTC() {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.Load(%s, %s) boltres.CreatedAt != res.CreatedAt: %v != %v", id, resultID, boltres.CreatedAt.UTC().Round(time.Microsecond), res.CreatedAt.UTC())
+	}
+
+	return boltres, err
+}
+
+func selectCacheResultWhereStoreIDAndResultID(db *sql.DB, storeID string, resultID string) (solver.CacheResult, error) {
+	var res solver.CacheResult
+	row := db.QueryRow("SELECT created_at, result_id FROM result WHERE store_id = ? AND result_id = ?", storeID, resultID)
+	err := row.Scan(&res.CreatedAt, &res.ID)
+	if err != nil {
+		return solver.CacheResult{}, err
+	}
+	return res, nil
+}
+
+func (s *MyKeyStorage) AddResult(id string, res solver.CacheResult) error {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.AddResult(%s, %v)", id, res)
+	err := addResult(s.DB, id, res)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.AddResult(%s, %v) failed: %v", id, res, err)
+	}
+	err = addResultIntoLinks(s.DB, id)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.AddResult(%s, %v) failed: %v", id, res, err)
+	}
+	return s.Store.AddResult(id, res)
+}
+
+func addResult(db *sql.DB, id string, res solver.CacheResult) error {
+	_, err := db.Exec("INSERT INTO result (store_id, result_id, created_at) VALUES (?, ?, ?)", id, res.ID, res.CreatedAt)
+	return err
+}
+
+func addResultIntoLinks(db *sql.DB, id string) error {
+	_, err := db.Exec("INSERT INTO link (link_id) VALUES (?)", id)
+	return err
+}
+
+func (s *MyKeyStorage) Release(resultID string) error {
+	// TODO: i think this may be recursive... too tired will check later
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.Release(%s)", resultID)
+	return s.Store.Release(resultID)
+}
+
+func deleteReleaseID(db *sql.DB, id string) error {
+	_, err := db.Exec("DELETE FROM result WHERE result_id = ?", id)
+	return err
+}
+
+// TODO: This is only used in one place.  If the id does not match a key It just wants the entire list of IDs.
+func (s *MyKeyStorage) WalkIDsByResult(resultID string, fn func(string) error) error {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.WalkIDsByResult(%s)", resultID)
+	boltIds := []string{}
+	err := s.Store.WalkIDsByResult(resultID, func(id string) error {
+		boltIds = append(boltIds, id)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, id := range boltIds {
+		err := fn(id)
+		if err != nil {
+			return err
+		}
+	}
+
+	ids, err := selectStoreIdsWhereResult(s.DB, resultID)
+	if err != nil {
+		return err
+	}
+	sort.Strings(boltIds)
+	sort.Strings(ids)
+	if !slices.Equal(boltIds, ids) {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkIDsByResult(%s) boltIds != ids: %v != %v", resultID, boltIds, ids)
+	}
+
+	return nil
+}
+
+func selectStoreIdsWhereResult(db *sql.DB, resultID string) ([]string, error) {
+	var ids []string
+	rows, err := db.Query("SELECT store_id FROM result WHERE result_id = ?", resultID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		err := rows.Scan(&id)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (s *MyKeyStorage) AddLink(id string, link solver.CacheInfoLink, target string) error {
+	// INSERT INTO links (link_id, digest, selector, link.input, link.output, target) VALUES (id, link.Digest, link.selector, link.input, link.output, target)
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.AddLink(%s, %v, %s)", id, link, target)
+	err := addLink(s.DB, id, link, target)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.AddLink(%s, %v, %s) failed: %v", id, link, target, err)
+	}
+	return s.Store.AddLink(id, link, target)
+}
+
+func addLink(db *sql.DB, id string, link solver.CacheInfoLink, target string) error {
+	_, err := db.Exec("INSERT INTO link (link_id, digest, selector, input, output, target) VALUES (?, ?, ?, ?, ?, ?)", id, link.Digest, link.Selector, link.Input, link.Output, target)
+	return err
+}
+
+// TODO: used twice. In both cases it creates lists of the ids.
+func (s *MyKeyStorage) WalkLinks(id string, link solver.CacheInfoLink, fn func(id string) error) error {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.WalkLinks(%s, %v)", id, link)
+	targets, err := selectTarget(s.DB, id, link)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkLinks(%s, %v) failed: %v", id, link, err)
+	}
+
+	boltTargets := []string{}
+	err = s.Store.WalkLinks(id, link, func(id string) error {
+		boltTargets = append(boltTargets, id)
+		return nil
+	})
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkLinks(%s, %v) failed: %v", id, link, err)
+	}
+
+	for _, t := range boltTargets {
+		err := fn(t)
+		if err != nil {
+			bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkLinks(%s, %v) failed: %v", id, link, err)
+			return err
+		}
+	}
+
+	sort.Strings(boltTargets)
+	sort.Strings(targets)
+	if !slices.Equal(boltTargets, targets) {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkLinks(%s, %v) boltTargets != targets: %v != %v", id, link, boltTargets, targets)
+	}
+
+	return nil
+}
+
+func selectTarget(db *sql.DB, id string, link solver.CacheInfoLink) ([]string, error) {
+	var targets []string
+	rows, err := db.Query("SELECT target FROM link WHERE link_id = ? AND digest = ? AND selector = ? AND input = ? AND output = ?", id, link.Digest, link.Selector, link.Input, link.Output)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var target string
+		err := rows.Scan(&target)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+func (s *MyKeyStorage) HasLink(id string, link solver.CacheInfoLink, target string) bool {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.HasLink(%s, %v, %s)", id, link, target)
+	return hasLink(s.DB, id, link, target) || s.Store.HasLink(id, link, target)
+	//return s.Store.HasLink(id, link, target)
+}
+
+func hasLink(db *sql.DB, id string, link solver.CacheInfoLink, target string) bool {
+	var v bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM link WHERE link_id = ? AND digest = ? AND selector = ? AND input = ? AND output = ? AND target = ?)", id, link.Digest, link.Selector, link.Input, link.Output, target).Scan(&v)
+	if err != nil {
+		bklog.G(context.TODO()).Errorf("hasLink(%s, %v, %s) failed: %v", id, link, target, err)
+	}
+	return v
+}
+
+// TODO: used only one time.  Recursively called.  Looks like a depth first search that accumulates the link digest, input and selector.
+func (s *MyKeyStorage) WalkBacklinks(id string, fn func(id string, link solver.CacheInfoLink) error) error {
+	bklog.G(context.TODO()).Warnf("MyKeyStorage.WalkBacklinks(%s)", id)
+	boltIDs := []string{}
+	boltLinks := []solver.CacheInfoLink{}
+	err := s.Store.WalkBacklinks(id, func(id string, link solver.CacheInfoLink) error {
+		boltIDs = append(boltIDs, id)
+		boltLinks = append(boltLinks, link)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for i := range boltIDs {
+		err := fn(boltIDs[i], boltLinks[i])
+		if err != nil {
+			return err
+		}
+	}
+
+	ids, links, err := selectAllLinksWhereTarget(s.DB, id)
+	if err != nil {
+		return err
+	}
+	_ = links
+
+	sort.Strings(boltIDs)
+	sort.Strings(ids)
+	if !slices.Equal(boltIDs, ids) {
+		bklog.G(context.TODO()).Errorf("MyKeyStorage.WalkBacklinks boltIDs != ids: %v != %v", boltIDs, ids)
+	}
+
+	return nil
+}
+
+func selectAllLinksWhereTarget(db *sql.DB, target string) ([]string, []solver.CacheInfoLink, error) {
+	var (
+		ids   []string
+		links []solver.CacheInfoLink
+	)
+
+	rows, err := db.Query("SELECT link_id, digest, selector, input, output FROM link WHERE target = ?", target)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			link solver.CacheInfoLink
+			id   string
+		)
+
+		err := rows.Scan(&id, &link.Digest, &link.Selector, &link.Input, &link.Output)
+		if err != nil {
+			return nil, nil, err
+		}
+		ids = append(ids, id)
+		links = append(links, link)
+	}
+	return ids, links, nil
+}
 
 type Store struct {
 	db *bolt.DB
@@ -396,17 +815,17 @@ func (s *Store) WalkBacklinks(id string, fn func(id string, link solver.CacheInf
 		if backLinks == nil {
 			return nil
 		}
-		b := backLinks.Bucket([]byte(id))
-		if b == nil {
+		backlinksBucket := backLinks.Bucket([]byte(id))
+		if backlinksBucket == nil {
 			return nil
 		}
 
-		if err := b.ForEach(func(bid, v []byte) error {
-			b = links.Bucket(bid)
-			if b == nil {
+		if err := backlinksBucket.ForEach(func(bid, v []byte) error {
+			backlinksBucket = links.Bucket(bid)
+			if backlinksBucket == nil {
 				return nil
 			}
-			if err := b.ForEach(func(k, v []byte) error {
+			if err := backlinksBucket.ForEach(func(k, v []byte) error {
 				parts := bytes.Split(k, []byte("@"))
 				if len(parts) == 2 {
 					if string(parts[1]) != id {

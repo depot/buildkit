@@ -68,6 +68,7 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -255,6 +256,12 @@ func main() {
 		opts = append(opts, grpc.KeepaliveEnforcementPolicy(depot.LoadKeepaliveEnforcementPolicy()))
 		opts = append(opts, grpc.KeepaliveParams(depot.LoadKeepaliveServerParams()))
 
+		// DEPOT: if TLS is configured, make the gRPC server terminate and validate those credentials
+		// so that we get AuthInfo in the gRPC handlers
+		if tlsConfig, err := serverCredentials(cfg.GRPC.TLS); err == nil && tlsConfig != nil {
+			opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+		}
+
 		server := grpc.NewServer(opts...)
 		grpc_health_v1.RegisterHealthServer(server, health.NewServer())
 
@@ -367,10 +374,14 @@ func serveGRPC(cfg config.GRPCConfig, server *grpc.Server, errCh chan error) err
 	if len(addrs) == 0 {
 		return errors.New("--addr cannot be empty")
 	}
-	tlsConfig, err := serverCredentials(cfg.TLS)
-	if err != nil {
-		return err
-	}
+
+	// DEPOT: skip listener TLS as we make the gRPC server validate TLS instead
+	// tlsConfig, err := serverCredentials(cfg.TLS)
+	// if err != nil {
+	// 	return err
+	// }
+	var tlsConfig *tls.Config
+
 	eg, _ := errgroup.WithContext(context.Background())
 	listeners := make([]net.Listener, 0, len(addrs))
 	for _, addr := range addrs {
@@ -586,7 +597,9 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 		}
 
 		if tlsConfig == nil {
-			bklog.L.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
+			// DEPOT: don't print this warning because we give the gRPC the TLS info directly, rather
+			// than terminating TLS at the listener
+			// bklog.L.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
 			return l, nil
 		}
 		return tls.NewListener(l, tlsConfig), nil

@@ -105,7 +105,15 @@ func (g *cacheRefGetter) getRefCacheDir(ctx context.Context, ref cache.Immutable
 
 func (g *cacheRefGetter) getRefCacheDirNoCache(ctx context.Context, key string, ref cache.ImmutableRef, id string, block bool) (cache.MutableRef, error) {
 	makeMutable := func(ref cache.ImmutableRef) (cache.MutableRef, error) {
-		newRef, err := g.cm.New(ctx, ref, g.session, cache.WithRecordType(client.UsageRecordTypeCacheMount), cache.WithDescription(g.name), cache.SetCachePolicyRetain)
+		policy := cache.CachePolicyRetain
+		recordType := client.UsageRecordTypeCacheMount
+		opts := cache.Options{
+			UpdateDescription: &g.name,
+			UpdateRecordType:  &recordType,
+			UpdateCachePolicy: &policy,
+		}
+
+		newRef, err := g.cm.New(ctx, ref, g.session, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +130,7 @@ func (g *cacheRefGetter) getRefCacheDirNoCache(ctx context.Context, key string, 
 		}
 		locked := false
 		for _, si := range sis {
-			if mRef, err := g.cm.GetMutable(ctx, si.ID()); err == nil {
+			if mRef, err := g.cm.GetMutable(ctx, si.ID(), cache.Options{}); err == nil {
 				bklog.G(ctx).Debugf("reusing ref for cache dir %q: %s", id, mRef.ID())
 				return mRef, nil
 			} else if errors.Is(err, cache.ErrLocked) {

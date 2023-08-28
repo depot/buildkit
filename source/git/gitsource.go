@@ -76,7 +76,7 @@ func (gs *gitSource) mountRemote(ctx context.Context, remote string, auth []stri
 
 	var remoteRef cache.MutableRef
 	for _, si := range sis {
-		remoteRef, err = gs.cache.GetMutable(ctx, si.ID())
+		remoteRef, err = gs.cache.GetMutable(ctx, si.ID(), cache.Options{})
 		if err != nil {
 			if errors.Is(err, cache.ErrLocked) {
 				// should never really happen as no other function should access this metadata, but lets be graceful
@@ -90,7 +90,13 @@ func (gs *gitSource) mountRemote(ctx context.Context, remote string, auth []stri
 
 	initializeRepo := false
 	if remoteRef == nil {
-		remoteRef, err = gs.cache.New(ctx, nil, g, cache.SetCachePolicyRetain, cache.WithDescription(fmt.Sprintf("shared git repo for %s", urlutil.RedactCredentials(remote))))
+		policy := cache.CachePolicyRetain
+		desc := fmt.Sprintf("shared git repo for %s", urlutil.RedactCredentials(remote))
+		opts := cache.Options{
+			UpdateCachePolicy: &policy,
+			UpdateDescription: &desc,
+		}
+		remoteRef, err = gs.cache.New(ctx, nil, g, opts)
 		if err != nil {
 			return "", nil, errors.Wrapf(err, "failed to create new mutable for %s", urlutil.RedactCredentials(remote))
 		}
@@ -385,7 +391,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		return nil, errors.Wrapf(err, "failed to search metadata for %s", snapshotKey)
 	}
 	if len(sis) > 0 {
-		return gs.cache.Get(ctx, sis[0].ID(), nil)
+		return gs.cache.Get(ctx, sis[0].ID(), nil, cache.Options{})
 	}
 
 	gs.locker.Lock(gs.src.Remote)
@@ -460,7 +466,13 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		}
 	}
 
-	checkoutRef, err := gs.cache.New(ctx, nil, g, cache.WithRecordType(client.UsageRecordTypeGitCheckout), cache.WithDescription(fmt.Sprintf("git snapshot for %s#%s", gs.src.Remote, ref)))
+	recordType := client.UsageRecordTypeGitCheckout
+	desc := fmt.Sprintf("git snapshot for %s#%s", gs.src.Remote, ref)
+	opts := cache.Options{
+		UpdateRecordType:  &recordType,
+		UpdateDescription: &desc,
+	}
+	checkoutRef, err := gs.cache.New(ctx, nil, g, opts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create new mutable for %s", urlutil.RedactCredentials(gs.src.Remote))
 	}

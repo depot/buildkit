@@ -133,7 +133,7 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 		return nil, err
 	}
 	for _, si := range sis {
-		if m, err := ls.cm.GetMutable(ctx, si.ID()); err == nil {
+		if m, err := ls.cm.GetMutable(ctx, si.ID(), cache.Options{}); err == nil {
 			bklog.G(ctx).Debugf("reusing ref for local: %s", m.ID())
 			mutable = m
 			break
@@ -143,7 +143,15 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 	}
 
 	if mutable == nil {
-		m, err := ls.cm.New(ctx, nil, nil, cache.SetCachePolicyRetain, cache.WithRecordType(client.UsageRecordTypeLocalSource), cache.WithDescription(fmt.Sprintf("local source for %s", ls.src.Name)))
+		cachePolicy := cache.CachePolicyRetain
+		recordType := client.UsageRecordTypeLocalSource
+		desc := fmt.Sprintf("local source for %s", ls.src.Name)
+		opts := cache.Options{
+			UpdateCachePolicy: &cachePolicy,
+			UpdateRecordType:  &recordType,
+			UpdateDescription: &desc,
+		}
+		m, err := ls.cm.New(ctx, nil, nil, opts)
 		if err != nil {
 			return nil, err
 		}

@@ -129,7 +129,7 @@ func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.Fronten
 			return nil, errors.Errorf("invalid ref: %T", res.Sys())
 		}
 
-		rootFS, err = workerRef.Worker.CacheManager().New(ctx, workerRef.ImmutableRef, session.NewGroup(sid))
+		rootFS, err = workerRef.Worker.CacheManager().New(ctx, workerRef.ImmutableRef, session.NewGroup(sid), cache.Options{})
 		if err != nil {
 			return nil, err
 		}
@@ -219,7 +219,7 @@ func (gf *gatewayFrontend) Solve(ctx context.Context, llbBridge frontend.Fronten
 		if !ok {
 			return nil, errors.Errorf("invalid ref: %T", r.Sys())
 		}
-		rootFS, err = workerRef.Worker.CacheManager().New(ctx, workerRef.ImmutableRef, session.NewGroup(sid))
+		rootFS, err = workerRef.Worker.CacheManager().New(ctx, workerRef.ImmutableRef, session.NewGroup(sid), cache.Options{})
 		if err != nil {
 			return nil, err
 		}

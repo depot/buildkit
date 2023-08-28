@@ -81,8 +81,9 @@ func (m *mergeOp) Exec(ctx context.Context, g session.Group, inputs []solver.Res
 		return nil, nil
 	}
 
+	desc := m.vtx.Name()
 	mergedRef, err := m.worker.CacheManager().Merge(ctx, refs, solver.ProgressControllerFromContext(ctx),
-		cache.WithDescription(m.vtx.Name()))
+		cache.Options{UpdateDescription: &desc})
 	if err != nil {
 		return nil, err
 	}

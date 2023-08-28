@@ -268,9 +268,9 @@ func (w *Worker) BuildkitVersion() client.BuildkitVersion {
 }
 
 func (w *Worker) LoadRef(ctx context.Context, id string, hidden bool) (cache.ImmutableRef, error) {
-	var opts []cache.RefOption
+	var opts cache.Options
 	if hidden {
-		opts = append(opts, cache.NoUpdateLastUsed)
+		opts.SkipUpdatingLastUsedAt = true
 	}
 	if id == "" {
 		// results can have nil refs if they are optimized out to be equal to scratch,
@@ -279,7 +279,7 @@ func (w *Worker) LoadRef(ctx context.Context, id string, hidden bool) (cache.Imm
 	}
 
 	pg := solver.ProgressControllerFromContext(ctx)
-	ref, err := w.CacheMgr.Get(ctx, id, pg, opts...)
+	ref, err := w.CacheMgr.Get(ctx, id, pg, opts)
 	var needsRemoteProviders cache.NeedsRemoteProviderError
 	if errors.As(err, &needsRemoteProviders) {
 		if optGetter := solver.CacheOptGetterOf(ctx); optGetter != nil {
@@ -295,8 +295,8 @@ func (w *Worker) LoadRef(ctx context.Context, id string, hidden bool) (cache.Imm
 					}
 				}
 			}
-			opts = append(opts, descHandlers)
-			ref, err = w.CacheMgr.Get(ctx, id, pg, opts...)
+			opts.DescHandlers = descHandlers
+			ref, err = w.CacheMgr.Get(ctx, id, pg, opts)
 		}
 	}
 	if err != nil {
@@ -353,7 +353,7 @@ func (w *Worker) PruneCacheMounts(ctx context.Context, ids []string) error {
 				return err
 			}
 			// if ref is unused try to clean it up right away by releasing it
-			if mref, err := w.CacheMgr.GetMutable(ctx, md.ID()); err == nil {
+			if mref, err := w.CacheMgr.GetMutable(ctx, md.ID(), cache.Options{}); err == nil {
 				go mref.Release(context.TODO())
 			}
 		}
@@ -481,25 +481,26 @@ func (w *Worker) FromRemote(ctx context.Context, remote *solver.Remote) (ref cac
 		if v, ok := desc.Annotations["buildkit/description"]; ok {
 			descr = v
 		}
-		opts := []cache.RefOption{
-			cache.WithDescription(descr),
-			cache.WithCreationTime(tm),
-			descHandlers,
+		opts := cache.Options{
+			UpdateDescription: &descr,
+			UpdateCreatedAt:   &tm,
+			DescHandlers:      descHandlers,
 		}
+
 		if ul, ok := remote.Provider.(interface {
 			UnlazySession(ocispecs.Descriptor) session.Group
 		}); ok {
 			s := ul.UnlazySession(desc)
 			if s != nil {
-				opts = append(opts, cache.Unlazy(s))
+				opts.UnlazySession = s
 			}
 		}
 		if dh, ok := descHandlers[desc.Digest]; ok {
 			if ref, ok := dh.Annotations["containerd.io/distribution.source.ref"]; ok {
-				opts = append(opts, cache.WithImageRef(ref)) // can set by registry cache importer
+				opts.AppendImageRef = &ref // can set by registry cache importer
 			}
 		}
-		ref, err := w.CacheMgr.GetByBlob(ctx, desc, current, opts...)
+		ref, err := w.CacheMgr.GetByBlob(ctx, desc, current, opts)
 		if current != nil {
 			current.Release(context.TODO())
 		}

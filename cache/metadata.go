@@ -76,6 +76,8 @@ type RefMetadata interface {
 	GetExternal(string) ([]byte, error)
 	SetExternal(string, []byte) error
 
+	AppendImageRef(string) error
+
 	ClearValueAndIndex(string, string) error
 }
 
@@ -221,6 +223,10 @@ func (md *cacheMetadata) GetEqualMutable() (RefMetadata, bool) {
 		return nil, false
 	}
 	return &cacheMetadata{emSi}, true
+}
+
+func (md *cacheMetadata) AppendImageRef(s string) error {
+	return md.appendImageRef(s)
 }
 
 func (md *cacheMetadata) getEqualMutable() string {

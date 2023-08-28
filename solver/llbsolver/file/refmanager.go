@@ -40,7 +40,13 @@ func (rm *RefManager) Prepare(ctx context.Context, ref fileoptypes.Ref, readonly
 		desc = d
 	}
 
-	mr, err := rm.cm.New(ctx, ir, g, cache.WithDescription(desc), cache.SetCachePolicyRetain)
+	policy := cache.CachePolicyRetain
+
+	mr, err := rm.cm.New(ctx, ir, g,
+		cache.Options{
+			UpdateDescription: &desc,
+			UpdateCachePolicy: &policy,
+		})
 	if err != nil {
 		return nil, err
 	}

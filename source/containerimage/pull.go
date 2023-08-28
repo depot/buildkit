@@ -388,7 +388,7 @@ func (p *puller) Snapshot(ctx context.Context, g session.Group) (ir cache.Immuta
 	for _, layerDesc := range p.manifest.Descriptors {
 		parent = current
 		current, err = p.CacheAccessor.GetByBlob(ctx, layerDesc, parent,
-			p.descHandlers, cache.WithImageRef(p.manifest.Ref))
+			cache.Options{AppendImageRef: &p.manifest.Ref, DescHandlers: p.descHandlers})
 		if parent != nil {
 			parent.Release(context.TODO())
 		}

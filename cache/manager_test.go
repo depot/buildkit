@@ -213,12 +213,14 @@ func TestManager(t *testing.T) {
 
 	cm := co.manager
 
-	_, err = cm.Get(ctx, "foobar", nil)
+	_, err = cm.Get(ctx, "foobar", nil, Options{})
 	require.Error(t, err)
 
 	checkDiskUsage(ctx, t, cm, 0, 0)
 
-	active, err := cm.New(ctx, nil, nil, SetCachePolicyRetain)
+	policy := CachePolicyRetain
+	opts := Options{UpdateCachePolicy: &policy}
+	active, err := cm.New(ctx, nil, nil, opts)
 	require.NoError(t, err)
 
 	m, err := active.Mount(ctx, false, nil)
@@ -235,7 +237,7 @@ func TestManager(t *testing.T) {
 	err = lm.Unmount()
 	require.NoError(t, err)
 
-	_, err = cm.GetMutable(ctx, active.ID())
+	_, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, ErrLocked))
 
@@ -246,7 +248,7 @@ func TestManager(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 1, 0)
 
-	_, err = cm.GetMutable(ctx, active.ID())
+	_, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, ErrLocked))
 
@@ -255,7 +257,7 @@ func TestManager(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 0, 1)
 
-	active, err = cm.GetMutable(ctx, active.ID())
+	active, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 1, 0)
@@ -271,18 +273,18 @@ func TestManager(t *testing.T) {
 	err = snap.Release(ctx)
 	require.NoError(t, err)
 
-	_, err = cm.GetMutable(ctx, active.ID())
+	_, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, errNotFound))
 
-	_, err = cm.GetMutable(ctx, snap.ID())
+	_, err = cm.GetMutable(ctx, snap.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, errInvalid))
 
-	snap, err = cm.Get(ctx, snap.ID(), nil)
+	snap, err = cm.Get(ctx, snap.ID(), nil, Options{})
 	require.NoError(t, err)
 
-	snap2, err := cm.Get(ctx, snap.ID(), nil)
+	snap2, err := cm.Get(ctx, snap.ID(), nil, Options{})
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 1, 0)
@@ -290,7 +292,7 @@ func TestManager(t *testing.T) {
 	err = snap.Release(ctx)
 	require.NoError(t, err)
 
-	active2, err := cm.New(ctx, snap2, nil, SetCachePolicyRetain)
+	active2, err := cm.New(ctx, snap2, nil, opts)
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 2, 0)
@@ -351,7 +353,7 @@ func TestLazyGetByBlob(t *testing.T) {
 	diffID, err := diffIDFromDescriptor(desc)
 	require.NoError(t, err)
 
-	_, err = cm.GetByBlob(ctx, desc, nil, descHandlers)
+	_, err = cm.GetByBlob(ctx, desc, nil, Options{DescHandlers: descHandlers})
 	require.NoError(t, err)
 
 	_, desc2, err := mapToBlob(map[string]string{"foo": "bar"}, false)
@@ -364,7 +366,7 @@ func TestLazyGetByBlob(t *testing.T) {
 	require.NotEqual(t, desc.Digest, desc2.Digest)
 	require.Equal(t, diffID, diffID2)
 
-	_, err = cm.GetByBlob(ctx, desc2, nil, descHandlers2)
+	_, err = cm.GetByBlob(ctx, desc2, nil, Options{DescHandlers: descHandlers2})
 	require.NoError(t, err)
 }
 
@@ -404,14 +406,14 @@ func TestMergeBlobchainID(t *testing.T) {
 			descHandlers[desc.Digest] = &DescHandler{
 				Provider: func(_ session.Group) content.Provider { return contentBuffer },
 			}
-			curBlob, err = cm.GetByBlob(ctx, desc, curBlob, descHandlers)
+			curBlob, err = cm.GetByBlob(ctx, desc, curBlob, Options{DescHandlers: descHandlers})
 			require.NoError(t, err)
 			descs = append(descs, desc)
 		}
 		mergeInputs = append(mergeInputs, curBlob.Clone())
 	}
 
-	mergeRef, err := cm.Merge(ctx, mergeInputs, nil)
+	mergeRef, err := cm.Merge(ctx, mergeInputs, nil, Options{})
 	require.NoError(t, err)
 
 	_, err = mergeRef.GetRemotes(ctx, true, config.RefConfig{Compression: compression.New(compression.Default)}, false, nil)
@@ -427,10 +429,10 @@ func TestMergeBlobchainID(t *testing.T) {
 	// verify you get the merge ref when asking for an equivalent blob chain
 	var curBlob ImmutableRef
 	for _, desc := range descs[:len(descs)-1] {
-		curBlob, err = cm.GetByBlob(ctx, desc, curBlob, descHandlers)
+		curBlob, err = cm.GetByBlob(ctx, desc, curBlob, Options{DescHandlers: descHandlers})
 		require.NoError(t, err)
 	}
-	blobRef, err := cm.GetByBlob(ctx, descs[len(descs)-1], curBlob, descHandlers)
+	blobRef, err := cm.GetByBlob(ctx, descs[len(descs)-1], curBlob, Options{DescHandlers: descHandlers})
 	require.NoError(t, err)
 	require.Equal(t, mergeRef.ID(), blobRef.ID())
 }
@@ -463,7 +465,7 @@ func TestSnapshotExtract(t *testing.T) {
 	err = content.WriteBlob(ctx, co.cs, "ref1", bytes.NewBuffer(b), desc)
 	require.NoError(t, err)
 
-	snap, err := cm.GetByBlob(ctx, desc, nil)
+	snap, err := cm.GetByBlob(ctx, desc, nil, Options{})
 	require.NoError(t, err)
 
 	require.Equal(t, false, !snap.(*immutableRef).getBlobOnly())
@@ -474,7 +476,7 @@ func TestSnapshotExtract(t *testing.T) {
 	err = content.WriteBlob(ctx, co.cs, "ref1", bytes.NewBuffer(b2), desc2)
 	require.NoError(t, err)
 
-	snap2, err := cm.GetByBlob(ctx, desc2, snap)
+	snap2, err := cm.GetByBlob(ctx, desc2, snap, Options{})
 	require.NoError(t, err)
 
 	size, err := snap2.(*immutableRef).size(ctx)
@@ -530,7 +532,7 @@ func TestSnapshotExtract(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, len(dirs))
 
-	snap, err = cm.Get(ctx, id, nil)
+	snap, err = cm.Get(ctx, id, nil, Options{})
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 2, 0)
@@ -594,7 +596,7 @@ func TestExtractOnMutable(t *testing.T) {
 
 	cm := co.manager
 
-	active, err := cm.New(ctx, nil, nil)
+	active, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 
 	snap, err := active.Commit(ctx)
@@ -612,7 +614,7 @@ func TestExtractOnMutable(t *testing.T) {
 	err = content.WriteBlob(ctx, co.cs, "ref2", bytes.NewBuffer(b2), desc2)
 	require.NoError(t, err)
 
-	_, err = cm.GetByBlob(ctx, desc2, snap)
+	_, err = cm.GetByBlob(ctx, desc2, snap, Options{})
 	require.Error(t, err)
 
 	leaseCtx, done, err := leaseutil.WithLease(ctx, co.lm, leases.WithExpiration(0))
@@ -624,7 +626,7 @@ func TestExtractOnMutable(t *testing.T) {
 	err = snap.(*immutableRef).computeChainMetadata(leaseCtx, map[string]struct{}{snap.ID(): {}})
 	require.NoError(t, err)
 
-	snap2, err := cm.GetByBlob(ctx, desc2, snap)
+	snap2, err := cm.GetByBlob(ctx, desc2, snap, Options{})
 	require.NoError(t, err)
 
 	err = snap.Release(context.TODO())
@@ -707,7 +709,7 @@ func TestSetBlob(t *testing.T) {
 
 	cm := co.manager
 
-	active, err := cm.New(ctx, nil, nil)
+	active, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 
 	snap, err := active.Commit(ctx)
@@ -752,7 +754,7 @@ func TestSetBlob(t *testing.T) {
 	require.Equal(t, snap.ID(), snapRef.getSnapshotID())
 	require.Equal(t, !snapRef.getBlobOnly(), true)
 
-	active, err = cm.New(ctx, snap, nil)
+	active, err = cm.New(ctx, snap, nil, Options{})
 	require.NoError(t, err)
 
 	snap2, err := active.Commit(ctx)
@@ -784,7 +786,7 @@ func TestSetBlob(t *testing.T) {
 	err = content.WriteBlob(ctx, co.cs, "ref3", bytes.NewBuffer(b3), desc3)
 	require.NoError(t, err)
 
-	snap3, err := cm.GetByBlob(ctx, desc3, snap)
+	snap3, err := cm.GetByBlob(ctx, desc3, snap, Options{})
 	require.NoError(t, err)
 
 	snapRef3 := snap3.(*immutableRef)
@@ -797,7 +799,7 @@ func TestSetBlob(t *testing.T) {
 	require.Equal(t, !snapRef3.getBlobOnly(), false)
 
 	// snap4 is same as snap2
-	snap4, err := cm.GetByBlob(ctx, desc2, snap)
+	snap4, err := cm.GetByBlob(ctx, desc2, snap, Options{})
 	require.NoError(t, err)
 
 	require.Equal(t, snap2.ID(), snap4.ID())
@@ -811,7 +813,7 @@ func TestSetBlob(t *testing.T) {
 	err = content.WriteBlob(ctx, co.cs, "ref5", bytes.NewBuffer(b5), desc5)
 	require.NoError(t, err)
 
-	snap5, err := cm.GetByBlob(ctx, desc5, snap)
+	snap5, err := cm.GetByBlob(ctx, desc5, snap, Options{})
 	require.NoError(t, err)
 
 	snapRef5 := snap5.(*immutableRef)
@@ -831,7 +833,7 @@ func TestSetBlob(t *testing.T) {
 	err = content.WriteBlob(ctx, co.cs, "ref6", bytes.NewBuffer(b6), desc6)
 	require.NoError(t, err)
 
-	snap6, err := cm.GetByBlob(ctx, desc6, snap3)
+	snap6, err := cm.GetByBlob(ctx, desc6, snap3, Options{})
 	require.NoError(t, err)
 
 	snapRef6 := snap6.(*immutableRef)
@@ -847,7 +849,7 @@ func TestSetBlob(t *testing.T) {
 		Annotations: map[string]string{
 			"containerd.io/uncompressed": digest.FromBytes([]byte("notexist")).String(),
 		},
-	}, snap3)
+	}, snap3, Options{})
 	require.Error(t, err)
 
 	clean(context.TODO())
@@ -876,13 +878,15 @@ func TestPrune(t *testing.T) {
 
 	cm := co.manager
 
-	active, err := cm.New(ctx, nil, nil)
+	active, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 
 	snap, err := active.Commit(ctx)
 	require.NoError(t, err)
 
-	active, err = cm.New(ctx, snap, nil, SetCachePolicyRetain)
+	policy := CachePolicyRetain
+	opts := Options{UpdateCachePolicy: &policy}
+	active, err = cm.New(ctx, snap, nil, opts)
 	require.NoError(t, err)
 
 	snap2, err := active.Commit(ctx)
@@ -928,7 +932,9 @@ func TestPrune(t *testing.T) {
 	err = snap.Release(ctx)
 	require.NoError(t, err)
 
-	active, err = cm.New(ctx, snap, nil, SetCachePolicyRetain)
+	policy = CachePolicyRetain
+	opts = Options{UpdateCachePolicy: &policy}
+	active, err = cm.New(ctx, snap, nil, opts)
 	require.NoError(t, err)
 
 	snap2, err = active.Commit(ctx)
@@ -987,19 +993,21 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 	cm := co.manager
 
-	active, err := cm.New(ctx, nil, nil, SetCachePolicyRetain)
+	policy := CachePolicyRetain
+	opts := Options{UpdateCachePolicy: &policy}
+	active, err := cm.New(ctx, nil, nil, opts)
 	require.NoError(t, err)
 
 	// after commit mutable is locked
 	snap, err := active.Commit(ctx)
 	require.NoError(t, err)
 
-	_, err = cm.GetMutable(ctx, active.ID())
+	_, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, ErrLocked))
 
 	// immutable refs still work
-	snap2, err := cm.Get(ctx, snap.ID(), nil)
+	snap2, err := cm.Get(ctx, snap.ID(), nil, Options{})
 	require.NoError(t, err)
 	require.Equal(t, snap.ID(), snap2.ID())
 
@@ -1010,12 +1018,12 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	// immutable work after final release as well
-	snap, err = cm.Get(ctx, snap.ID(), nil)
+	snap, err = cm.Get(ctx, snap.ID(), nil, Options{})
 	require.NoError(t, err)
 	require.Equal(t, snap.ID(), snap2.ID())
 
 	// active can't be get while immutable is held
-	_, err = cm.GetMutable(ctx, active.ID())
+	_, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, ErrLocked))
 
@@ -1023,12 +1031,12 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	// after release mutable becomes available again
-	active2, err := cm.GetMutable(ctx, active.ID())
+	active2, err := cm.GetMutable(ctx, active.ID(), Options{})
 	require.NoError(t, err)
 	require.Equal(t, active2.ID(), active.ID())
 
 	// because ref was took mutable old immutable are cleared
-	_, err = cm.Get(ctx, snap.ID(), nil)
+	_, err = cm.Get(ctx, snap.ID(), nil, Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, errNotFound))
 
@@ -1043,12 +1051,12 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	// mutable is gone after finalize
-	_, err = cm.GetMutable(ctx, active2.ID())
+	_, err = cm.GetMutable(ctx, active2.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, errNotFound))
 
 	// immutable still works
-	snap2, err = cm.Get(ctx, snap.ID(), nil)
+	snap2, err = cm.Get(ctx, snap.ID(), nil, Options{})
 	require.NoError(t, err)
 	require.Equal(t, snap.ID(), snap2.ID())
 
@@ -1056,7 +1064,9 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	// test restarting after commit
-	active, err = cm.New(ctx, nil, nil, SetCachePolicyRetain)
+	policy = CachePolicyRetain
+	opts = Options{UpdateCachePolicy: &policy}
+	active, err = cm.New(ctx, nil, nil, opts)
 	require.NoError(t, err)
 
 	// after commit mutable is locked
@@ -1077,16 +1087,16 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 	cm = co.manager
 
-	snap2, err = cm.Get(ctx, snap.ID(), nil)
+	snap2, err = cm.Get(ctx, snap.ID(), nil, Options{})
 	require.NoError(t, err)
 
 	err = snap2.Release(ctx)
 	require.NoError(t, err)
 
-	active, err = cm.GetMutable(ctx, active.ID())
+	active, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.NoError(t, err)
 
-	_, err = cm.Get(ctx, snap.ID(), nil)
+	_, err = cm.Get(ctx, snap.ID(), nil, Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, errNotFound))
 
@@ -1107,7 +1117,7 @@ func TestLazyCommit(t *testing.T) {
 	t.Cleanup(cleanup)
 	cm = co.manager
 
-	snap2, err = cm.Get(ctx, snap.ID(), nil)
+	snap2, err = cm.Get(ctx, snap.ID(), nil, Options{})
 	require.NoError(t, err)
 
 	err = snap2.Finalize(ctx)
@@ -1116,7 +1126,7 @@ func TestLazyCommit(t *testing.T) {
 	err = snap2.Release(ctx)
 	require.NoError(t, err)
 
-	_, err = cm.GetMutable(ctx, active.ID())
+	_, err = cm.GetMutable(ctx, active.ID(), Options{})
 	require.Error(t, err)
 	require.Equal(t, true, errors.Is(err, errNotFound))
 }
@@ -1163,7 +1173,7 @@ func TestLoopLeaseContent(t *testing.T) {
 	}
 
 	// Create a compression loop
-	ref, err := cm.GetByBlob(ctx, orgDesc, nil, descHandlers)
+	ref, err := cm.GetByBlob(ctx, orgDesc, nil, Options{DescHandlers: descHandlers})
 	require.NoError(t, err)
 	allRefs := []ImmutableRef{ref}
 	defer func() {
@@ -1180,7 +1190,7 @@ func TestLoopLeaseContent(t *testing.T) {
 
 		desc := remotes[0].Descriptors[0]
 		chain = append(chain, desc)
-		ref, err = cm.GetByBlob(ctx, desc, nil, descHandlers)
+		ref, err = cm.GetByBlob(ctx, desc, nil, Options{DescHandlers: descHandlers})
 		require.NoError(t, err)
 		allRefs = append(allRefs, ref)
 	}
@@ -1365,7 +1375,7 @@ func testSharingCompressionVariant(ctx context.Context, t *testing.T, co *cmOut,
 		}
 
 		// Create compression variants
-		aRef, err := cm.GetByBlob(ctx, aDesc, nil, descHandlers)
+		aRef, err := cm.GetByBlob(ctx, aDesc, nil, Options{DescHandlers: descHandlers})
 		require.NoError(t, err)
 		defer aRef.Release(ctx)
 		var bDesc ocispecs.Descriptor
@@ -1379,7 +1389,7 @@ func testSharingCompressionVariant(ctx context.Context, t *testing.T, co *cmOut,
 			}
 		}
 		require.NotEqual(t, "", bDesc.Digest, "compression B must be chosen from the variants of A")
-		bRef, err := cm.GetByBlob(ctx, bDesc, nil, descHandlers)
+		bRef, err := cm.GetByBlob(ctx, bDesc, nil, Options{DescHandlers: descHandlers})
 		require.NoError(t, err)
 		defer bRef.Release(ctx)
 		for _, compressionType := range append([]compression.Type{testCase.b}, testCase.bVariants...) {
@@ -1664,7 +1674,7 @@ func TestGetRemotes(t *testing.T) {
 
 	// Create 3 levels of mutable refs, where each parent ref has 2 children (this tests parallel creation of
 	// overlapping blob chains).
-	lazyRef, err := cm.GetByBlob(ctx, descs[0], nil, descHandlers)
+	lazyRef, err := cm.GetByBlob(ctx, descs[0], nil, Options{DescHandlers: descHandlers})
 	require.NoError(t, err)
 
 	refs := []ImmutableRef{lazyRef}
@@ -1672,7 +1682,7 @@ func TestGetRemotes(t *testing.T) {
 		var newRefs []ImmutableRef
 		for j, ir := range refs {
 			for k := 0; k < 2; k++ {
-				mutRef, err := cm.New(ctx, ir, nil, descHandlers)
+				mutRef, err := cm.New(ctx, ir, nil, Options{DescHandlers: descHandlers})
 				require.NoError(t, err)
 
 				m, err := mutRef.Mount(ctx, false, nil)
@@ -1715,7 +1725,7 @@ func TestGetRemotes(t *testing.T) {
 	}
 
 	// also test the original lazyRef to get coverage for refs that don't have to be extracted from the snapshotter
-	lazyRef2, err := cm.GetByBlob(ctx, descs[1], nil, descHandlers)
+	lazyRef2, err := cm.GetByBlob(ctx, descs[1], nil, Options{DescHandlers: descHandlers})
 	require.NoError(t, err)
 	refs = append(refs, lazyRef2)
 
@@ -1943,7 +1953,7 @@ func TestNondistributableBlobs(t *testing.T) {
 		Provider: func(_ session.Group) content.Provider { return contentBuffer },
 	}
 
-	ref, err := cm.GetByBlob(ctx, desc, nil, descHandlers)
+	ref, err := cm.GetByBlob(ctx, desc, nil, Options{DescHandlers: descHandlers})
 	require.NoError(t, err)
 
 	remotes, err := ref.GetRemotes(ctx, true, config.RefConfig{PreferNonDistributable: true}, false, nil)
@@ -2046,13 +2056,13 @@ func TestMergeOp(t *testing.T) {
 	t.Cleanup(cleanup)
 	cm := co.manager
 
-	emptyMerge, err := cm.Merge(ctx, nil, nil)
+	emptyMerge, err := cm.Merge(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 	require.Nil(t, emptyMerge)
 
 	var baseRefs []ImmutableRef
 	for i := 0; i < 6; i++ {
-		active, err := cm.New(ctx, nil, nil)
+		active, err := cm.New(ctx, nil, nil, Options{})
 		require.NoError(t, err)
 		m, err := active.Mount(ctx, false, nil)
 		require.NoError(t, err)
@@ -2073,7 +2083,7 @@ func TestMergeOp(t *testing.T) {
 		require.EqualValues(t, 8192, size)
 	}
 
-	singleMerge, err := cm.Merge(ctx, baseRefs[:1], nil)
+	singleMerge, err := cm.Merge(ctx, baseRefs[:1], nil, Options{})
 	require.NoError(t, err)
 	require.True(t, singleMerge.(*immutableRef).getCommitted())
 	m, err := singleMerge.Mount(ctx, true, nil)
@@ -2094,7 +2104,7 @@ func TestMergeOp(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	merge1, err := cm.Merge(ctx, baseRefs[:3], nil)
+	merge1, err := cm.Merge(ctx, baseRefs[:3], nil, Options{})
 	require.NoError(t, err)
 	require.True(t, merge1.(*immutableRef).getCommitted())
 	_, err = merge1.Mount(ctx, true, nil)
@@ -2104,7 +2114,7 @@ func TestMergeOp(t *testing.T) {
 	require.EqualValues(t, 4096, size1) // hardlinking means all but the first snapshot doesn't take up space
 	checkDiskUsage(ctx, t, cm, 7, 0)
 
-	merge2, err := cm.Merge(ctx, baseRefs[3:], nil)
+	merge2, err := cm.Merge(ctx, baseRefs[3:], nil, Options{})
 	require.NoError(t, err)
 	require.True(t, merge2.(*immutableRef).getCommitted())
 	_, err = merge2.Mount(ctx, true, nil)
@@ -2120,7 +2130,7 @@ func TestMergeOp(t *testing.T) {
 	checkDiskUsage(ctx, t, cm, 8, 0)
 	// should still be able to use merges based on released refs
 
-	merge3, err := cm.Merge(ctx, []ImmutableRef{merge1, merge2}, nil)
+	merge3, err := cm.Merge(ctx, []ImmutableRef{merge1, merge2}, nil, Options{})
 	require.NoError(t, err)
 	require.True(t, merge3.(*immutableRef).getCommitted())
 	require.NoError(t, merge1.Release(ctx))
@@ -2164,17 +2174,17 @@ func TestDiffOp(t *testing.T) {
 	t.Cleanup(cleanup)
 	cm := co.manager
 
-	newLower, err := cm.New(ctx, nil, nil)
+	newLower, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 	lowerA, err := newLower.Commit(ctx)
 	require.NoError(t, err)
-	newUpper, err := cm.New(ctx, nil, nil)
+	newUpper, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 	upperA, err := newUpper.Commit(ctx)
 	require.NoError(t, err)
 
 	// verify that releasing parents does not invalidate a diff ref until it is released
-	diff, err := cm.Diff(ctx, lowerA, upperA, nil)
+	diff, err := cm.Diff(ctx, lowerA, upperA, nil, Options{})
 	require.NoError(t, err)
 	checkDiskUsage(ctx, t, cm, 3, 0)
 	require.NoError(t, lowerA.Release(ctx))
@@ -2190,28 +2200,28 @@ func TestDiffOp(t *testing.T) {
 	checkDiskUsage(ctx, t, cm, 0, 0)
 
 	// test "unmerge" diffs that are defined as a merge of single-layer diffs
-	newRef, err := cm.New(ctx, nil, nil)
+	newRef, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 	a, err := newRef.Commit(ctx)
 	require.NoError(t, err)
-	newRef, err = cm.New(ctx, a, nil)
+	newRef, err = cm.New(ctx, a, nil, Options{})
 	require.NoError(t, err)
 	b, err := newRef.Commit(ctx)
 	require.NoError(t, err)
-	newRef, err = cm.New(ctx, b, nil)
+	newRef, err = cm.New(ctx, b, nil, Options{})
 	require.NoError(t, err)
 	c, err := newRef.Commit(ctx)
 	require.NoError(t, err)
-	newRef, err = cm.New(ctx, c, nil)
+	newRef, err = cm.New(ctx, c, nil, Options{})
 	require.NoError(t, err)
 	d, err := newRef.Commit(ctx)
 	require.NoError(t, err)
-	newRef, err = cm.New(ctx, d, nil)
+	newRef, err = cm.New(ctx, d, nil, Options{})
 	require.NoError(t, err)
 	e, err := newRef.Commit(ctx)
 	require.NoError(t, err)
 
-	diff, err = cm.Diff(ctx, c, e, nil)
+	diff, err = cm.Diff(ctx, c, e, nil, Options{})
 	require.NoError(t, err)
 	checkDiskUsage(ctx, t, cm, 8, 0) // 5 base refs + 2 diffs + 1 merge
 	require.NoError(t, a.Release(ctx))
@@ -2230,11 +2240,11 @@ func TestDiffOp(t *testing.T) {
 	checkDiskUsage(ctx, t, cm, 0, 0)
 
 	// Test using nil as upper
-	newLower, err = cm.New(ctx, nil, nil)
+	newLower, err = cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 	lowerB, err := newLower.Commit(ctx)
 	require.NoError(t, err)
-	diff, err = cm.Diff(ctx, lowerB, nil, nil)
+	diff, err = cm.Diff(ctx, lowerB, nil, nil, Options{})
 	require.NoError(t, err)
 	checkDiskUsage(ctx, t, cm, 2, 0)
 	require.NoError(t, lowerB.Release(ctx))
@@ -2269,8 +2279,11 @@ func TestLoadHalfFinalizedRef(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(cleanup)
 	cm := co.manager.(*cacheManager)
-
-	mref, err := cm.New(ctx, nil, nil, SetCachePolicyRetain)
+	policy := CachePolicyRetain
+	opts := Options{
+		UpdateCachePolicy: &policy,
+	}
+	mref, err := cm.New(ctx, nil, nil, opts)
 	require.NoError(t, err)
 	mutRef := mref.(*mutableRef)
 
@@ -2314,10 +2327,10 @@ func TestLoadHalfFinalizedRef(t *testing.T) {
 	t.Cleanup(cleanup)
 	cm = co.manager.(*cacheManager)
 
-	_, err = cm.GetMutable(ctx, mutRef.ID())
+	_, err = cm.GetMutable(ctx, mutRef.ID(), Options{})
 	require.ErrorIs(t, err, errNotFound)
 
-	iref, err = cm.Get(ctx, immutRef.ID(), nil)
+	iref, err = cm.Get(ctx, immutRef.ID(), nil, Options{})
 	require.NoError(t, err)
 	require.NoError(t, iref.Finalize(ctx))
 	immutRef = iref.(*immutableRef)
@@ -2347,7 +2360,7 @@ func TestMountReadOnly(t *testing.T) {
 	t.Cleanup(cleanup)
 	cm := co.manager
 
-	mutRef, err := cm.New(ctx, nil, nil)
+	mutRef, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 
 	for i := 0; i < 2; i++ {
@@ -2388,7 +2401,7 @@ func TestMountReadOnly(t *testing.T) {
 		require.True(t, isReadOnly(rwMnts[0]))
 
 		// repeat with a ref that has a parent
-		mutRef, err = cm.New(ctx, immutRef, nil)
+		mutRef, err = cm.New(ctx, immutRef, nil, Options{})
 		require.NoError(t, err)
 	}
 }
@@ -2417,17 +2430,17 @@ func TestLoadBrokenParents(t *testing.T) {
 	t.Cleanup(cleanup)
 	cm := co.manager.(*cacheManager)
 
-	mutRef, err := cm.New(ctx, nil, nil)
+	mutRef, err := cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 	refA, err := mutRef.Commit(ctx)
 	require.NoError(t, err)
 	refAID := refA.ID()
-	mutRef, err = cm.New(ctx, nil, nil)
+	mutRef, err = cm.New(ctx, nil, nil, Options{})
 	require.NoError(t, err)
 	refB, err := mutRef.Commit(ctx)
 	require.NoError(t, err)
 
-	_, err = cm.Merge(ctx, []ImmutableRef{refA, refB}, nil)
+	_, err = cm.Merge(ctx, []ImmutableRef{refA, refB}, nil, Options{})
 	require.NoError(t, err)
 	checkDiskUsage(ctx, t, cm, 3, 0)
 
@@ -2447,7 +2460,7 @@ func TestLoadBrokenParents(t *testing.T) {
 	cm = co.manager.(*cacheManager)
 
 	checkDiskUsage(ctx, t, cm, 0, 1)
-	refA, err = cm.Get(ctx, refAID, nil)
+	refA, err = cm.Get(ctx, refAID, nil, Options{})
 	require.NoError(t, err)
 	require.Len(t, refA.(*immutableRef).refs, 1)
 }

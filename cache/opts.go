@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/content"
+	"github.com/hashicorp/go-multierror"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/util/progress"
@@ -12,7 +13,7 @@ import (
 )
 
 type Options struct {
-	Unlazy                 session.Group
+	UnlazySession          session.Group
 	SetSnapshotID          *string
 	AppendImageRef         *string
 	UpdateDescription      *string
@@ -21,6 +22,47 @@ type Options struct {
 	UpdateRecordType       *client.UsageRecordType
 	DescHandlers           DescHandlers
 	SkipUpdatingLastUsedAt bool
+}
+
+func (o *Options) Apply(ref RefMetadata) error {
+	var rerr error
+
+	if o.SetSnapshotID != nil {
+		err := ref.SetString(keySnapshot, *o.SetSnapshotID, "")
+		rerr = multierror.Append(rerr, err)
+	}
+	if o.AppendImageRef != nil {
+		err := ref.AppendImageRef(*o.AppendImageRef)
+		rerr = multierror.Append(rerr, err)
+	}
+
+	if o.UpdateDescription != nil {
+		err := ref.SetDescription(*o.UpdateDescription)
+		rerr = multierror.Append(rerr, err)
+	}
+
+	if o.UpdateCreatedAt != nil {
+		err := ref.SetCreatedAt(*o.UpdateCreatedAt)
+		rerr = multierror.Append(rerr, err)
+	}
+
+	if o.UpdateCachePolicy != nil {
+		switch *o.UpdateCachePolicy {
+		case CachePolicyDefault:
+			err := ref.SetCachePolicyDefault()
+			rerr = multierror.Append(rerr, err)
+		case CachePolicyRetain:
+			err := ref.SetCachePolicyRetain()
+			rerr = multierror.Append(rerr, err)
+		}
+	}
+
+	if o.UpdateRecordType != nil {
+		err := ref.SetRecordType(*o.UpdateRecordType)
+		rerr = multierror.Append(rerr, err)
+	}
+
+	return rerr
 }
 
 type DescHandler struct {
@@ -33,15 +75,6 @@ type DescHandler struct {
 
 type DescHandlers map[digest.Digest]*DescHandler
 
-func descHandlersOf(opts ...RefOption) DescHandlers {
-	for _, opt := range opts {
-		if opt, ok := opt.(DescHandlers); ok {
-			return opt
-		}
-	}
-	return nil
-}
-
 type DescHandlerKey digest.Digest
 
 type NeedsRemoteProviderError []digest.Digest //nolint:errname
@@ -51,12 +84,3 @@ func (m NeedsRemoteProviderError) Error() string {
 }
 
 type Unlazy session.Group
-
-func unlazySessionOf(opts ...RefOption) session.Group {
-	for _, opt := range opts {
-		if opt, ok := opt.(session.Group); ok {
-			return opt
-		}
-	}
-	return nil
-}

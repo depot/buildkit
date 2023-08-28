@@ -43,7 +43,7 @@ func TestWorkerExec(t *testing.T, w *base.Worker) {
 	require.NoError(t, err)
 
 	snap := NewBusyboxSourceSnapshot(ctx, t, w, sm)
-	root, err := w.CacheMgr.New(ctx, snap, nil)
+	root, err := w.CacheMgr.New(ctx, snap, nil, cache.Options{})
 	require.NoError(t, err)
 
 	id := identity.NewID()
@@ -167,7 +167,7 @@ func TestWorkerExecFailures(t *testing.T, w *base.Worker) {
 	require.NoError(t, err)
 
 	snap := NewBusyboxSourceSnapshot(ctx, t, w, sm)
-	root, err := w.CacheMgr.New(ctx, snap, nil)
+	root, err := w.CacheMgr.New(ctx, snap, nil, cache.Options{})
 	require.NoError(t, err)
 
 	id := identity.NewID()
@@ -241,7 +241,7 @@ func TestWorkerCancel(t *testing.T, w *base.Worker) {
 	require.NoError(t, err)
 
 	snap := NewBusyboxSourceSnapshot(ctx, t, w, sm)
-	root, err := w.CacheMgr.New(ctx, snap, nil)
+	root, err := w.CacheMgr.New(ctx, snap, nil, cache.Options{})
 	require.NoError(t, err)
 
 	id := identity.NewID()

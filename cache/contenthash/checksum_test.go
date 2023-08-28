@@ -1125,7 +1125,7 @@ func TestPersistence(t *testing.T) {
 	err = ref.Release(context.TODO())
 	require.NoError(t, err)
 
-	ref, err = cm.Get(context.TODO(), id, nil)
+	ref, err = cm.Get(context.TODO(), id, nil, cache.Options{})
 	require.NoError(t, err)
 
 	dgst, err = Checksum(context.TODO(), ref, "foo", ChecksumOpts{FollowLinks: true}, nil)
@@ -1143,7 +1143,7 @@ func TestPersistence(t *testing.T) {
 	cm, cleanup = setupCacheManager(t, tmpdir, "native", snapshotter)
 	t.Cleanup(cleanup)
 
-	ref, err = cm.Get(context.TODO(), id, nil)
+	ref, err = cm.Get(context.TODO(), id, nil, cache.Options{})
 	require.NoError(t, err)
 
 	dgst, err = Checksum(context.TODO(), ref, "foo", ChecksumOpts{FollowLinks: true}, nil)
@@ -1157,7 +1157,11 @@ func createRef(t *testing.T, cm cache.Manager, files []string) cache.ImmutableRe
 		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
 	}
 
-	mref, err := cm.New(context.TODO(), nil, nil, cache.SetCachePolicyRetain)
+	cachePolicy := cache.CachePolicyRetain
+	opts := cache.Options{
+		UpdateCachePolicy: &cachePolicy,
+	}
+	mref, err := cm.New(context.TODO(), nil, nil, opts)
 	require.NoError(t, err)
 
 	mounts, err := mref.Mount(context.TODO(), false, nil)

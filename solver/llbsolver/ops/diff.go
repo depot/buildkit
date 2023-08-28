@@ -109,8 +109,9 @@ func (d *diffOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 		return []solver.Result{worker.NewWorkerRefResult(nil, d.worker)}, nil
 	}
 
+	desc := d.vtx.Name()
 	diffRef, err := d.worker.CacheManager().Diff(ctx, lowerRef, upperRef, solver.ProgressControllerFromContext(ctx),
-		cache.WithDescription(d.vtx.Name()))
+		cache.Options{UpdateDescription: &desc})
 	if err != nil {
 		return nil, err
 	}

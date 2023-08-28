@@ -92,7 +92,7 @@ func NewContainer(ctx context.Context, w worker.Worker, sm *session.Manager, g s
 		if m.Input != opspb.Empty {
 			cm = refs[m.Input].Worker.CacheManager()
 		}
-		return cm.New(ctx, ref, g)
+		return cm.New(ctx, ref, g, cache.Options{})
 	}, platform.OS)
 	if err != nil {
 		for i := len(p.Actives) - 1; i >= 0; i-- { // call in LIFO order

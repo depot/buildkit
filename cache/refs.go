@@ -1454,7 +1454,7 @@ func (sr *mutableRef) commit(ctx context.Context) (_ *immutableRef, rerr error) 
 		}
 	}
 
-	if err := initializeMetadata(rec.cacheMetadata, rec.parentRefs); err != nil {
+	if err := initializeMetadata(rec.cacheMetadata, rec.parentRefs, Options{}); err != nil {
 		return nil, err
 	}
 

@@ -113,7 +113,11 @@ func TestRuncWorker(t *testing.T) {
 	// make sure the error is caused before running `echo foo > /bar`.
 	require.Contains(t, stderr.String(), "read-only file system")
 
-	root, err := w.CacheMgr.New(ctx, snap, nil, cache.SetCachePolicyRetain)
+	cachePolicy := cache.CachePolicyRetain
+	opts := cache.Options{
+		UpdateCachePolicy: &cachePolicy,
+	}
+	root, err := w.CacheMgr.New(ctx, snap, nil, opts)
 	require.NoError(t, err)
 
 	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stderr: &nopCloser{stderr}}, nil)
@@ -189,7 +193,7 @@ func TestRuncWorkerNoProcessSandbox(t *testing.T) {
 	sm, err := session.NewManager()
 	require.NoError(t, err)
 	snap := tests.NewBusyboxSourceSnapshot(ctx, t, w, sm)
-	root, err := w.CacheMgr.New(ctx, snap, nil)
+	root, err := w.CacheMgr.New(ctx, snap, nil, cache.Options{})
 	require.NoError(t, err)
 
 	// ensure the procfs is shared

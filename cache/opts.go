@@ -2,12 +2,26 @@ package cache
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/containerd/containerd/content"
+	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/util/progress"
 	digest "github.com/opencontainers/go-digest"
 )
+
+type Options struct {
+	Unlazy                 session.Group
+	SetSnapshotID          *string
+	AppendImageRef         *string
+	UpdateDescription      *string
+	UpdateCreatedAt        *time.Time
+	UpdateCachePolicy      *CachePolicy
+	UpdateRecordType       *client.UsageRecordType
+	DescHandlers           DescHandlers
+	SkipUpdatingLastUsedAt bool
+}
 
 type DescHandler struct {
 	Provider       func(session.Group) content.Provider

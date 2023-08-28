@@ -113,7 +113,7 @@ func TestRuncWorker(t *testing.T) {
 	// make sure the error is caused before running `echo foo > /bar`.
 	require.Contains(t, stderr.String(), "read-only file system")
 
-	root, err := w.CacheMgr.New(ctx, snap, nil, cache.CachePolicyRetain)
+	root, err := w.CacheMgr.New(ctx, snap, nil, cache.SetCachePolicyRetain)
 	require.NoError(t, err)
 
 	_, err = w.WorkerOpt.Executor.Run(ctx, "", execMount(root, false), nil, executor.ProcessInfo{Meta: meta, Stderr: &nopCloser{stderr}}, nil)

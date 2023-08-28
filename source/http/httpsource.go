@@ -253,7 +253,7 @@ func (hs *httpSourceHandler) CacheKey(ctx context.Context, g session.Group, inde
 }
 
 func (hs *httpSourceHandler) save(ctx context.Context, resp *http.Response, s session.Group) (ref cache.ImmutableRef, dgst digest.Digest, retErr error) {
-	newRef, err := hs.cache.New(ctx, nil, s, cache.CachePolicyRetain, cache.WithDescription(fmt.Sprintf("http url %s", hs.src.URL)))
+	newRef, err := hs.cache.New(ctx, nil, s, cache.SetCachePolicyRetain, cache.WithDescription(fmt.Sprintf("http url %s", hs.src.URL)))
 	if err != nil {
 		return nil, "", err
 	}

@@ -1157,7 +1157,7 @@ func createRef(t *testing.T, cm cache.Manager, files []string) cache.ImmutableRe
 		t.Skip("Depends on unimplemented containerd bind-mount support on Windows")
 	}
 
-	mref, err := cm.New(context.TODO(), nil, nil, cache.CachePolicyRetain)
+	mref, err := cm.New(context.TODO(), nil, nil, cache.SetCachePolicyRetain)
 	require.NoError(t, err)
 
 	mounts, err := mref.Mount(context.TODO(), false, nil)

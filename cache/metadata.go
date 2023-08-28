@@ -192,19 +192,19 @@ func (md *cacheMetadata) GetCreatedAt() time.Time {
 }
 
 func (md *cacheMetadata) HasCachePolicyDefault() bool {
-	return md.getCachePolicy() == cachePolicyDefault
+	return md.getCachePolicy() == CachePolicyDefault
 }
 
 func (md *cacheMetadata) SetCachePolicyDefault() error {
-	return md.setCachePolicy(cachePolicyDefault)
+	return md.setCachePolicy(CachePolicyDefault)
 }
 
 func (md *cacheMetadata) HasCachePolicyRetain() bool {
-	return md.getCachePolicy() == cachePolicyRetain
+	return md.getCachePolicy() == CachePolicyRetain
 }
 
 func (md *cacheMetadata) SetCachePolicyRetain() error {
-	return md.setCachePolicy(cachePolicyRetain)
+	return md.setCachePolicy(CachePolicyRetain)
 }
 
 func (md *cacheMetadata) GetExternal(s string) ([]byte, error) {
@@ -381,15 +381,15 @@ func (md *cacheMetadata) getBlobSize() int64 {
 	return sizeUnknown
 }
 
-func (md *cacheMetadata) setCachePolicy(p cachePolicy) error {
+func (md *cacheMetadata) setCachePolicy(p CachePolicy) error {
 	return md.setValue(keyCachePolicy, p, "")
 }
 
-func (md *cacheMetadata) getCachePolicy() cachePolicy {
+func (md *cacheMetadata) getCachePolicy() CachePolicy {
 	if i, ok := md.getInt64(keyCachePolicy); ok {
-		return cachePolicy(i)
+		return CachePolicy(i)
 	}
-	return cachePolicyDefault
+	return CachePolicyDefault
 }
 
 func (md *cacheMetadata) getLastUsed() (int, *time.Time) {

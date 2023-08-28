@@ -1450,22 +1450,22 @@ func IsNotFound(err error) bool {
 
 type RefOption interface{}
 
-type cachePolicy int
+type CachePolicy int
 
 const (
-	cachePolicyDefault cachePolicy = iota
-	cachePolicyRetain
+	CachePolicyDefault CachePolicy = iota
+	CachePolicyRetain
 )
 
 type noUpdateLastUsed struct{}
 
 var NoUpdateLastUsed noUpdateLastUsed
 
-func CachePolicyRetain(m *cacheMetadata) error {
+func SetCachePolicyRetain(m *cacheMetadata) error {
 	return m.SetCachePolicyRetain()
 }
 
-func CachePolicyDefault(m *cacheMetadata) error {
+func SetCachePolicyDefault(m *cacheMetadata) error {
 	return m.SetCachePolicyDefault()
 }
 

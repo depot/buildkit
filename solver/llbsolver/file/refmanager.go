@@ -40,7 +40,7 @@ func (rm *RefManager) Prepare(ctx context.Context, ref fileoptypes.Ref, readonly
 		desc = d
 	}
 
-	mr, err := rm.cm.New(ctx, ir, g, cache.WithDescription(desc), cache.CachePolicyRetain)
+	mr, err := rm.cm.New(ctx, ir, g, cache.WithDescription(desc), cache.SetCachePolicyRetain)
 	if err != nil {
 		return nil, err
 	}

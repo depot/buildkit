@@ -36,6 +36,7 @@ import (
 	"github.com/containerd/continuity/fs/fstest"
 	"github.com/containerd/stargz-snapshotter/estargz"
 	"github.com/klauspost/compress/zstd"
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/depot/cache/metadata"
@@ -218,7 +219,7 @@ func TestManager(t *testing.T) {
 
 	checkDiskUsage(ctx, t, cm, 0, 0)
 
-	active, err := cm.New(ctx, nil, nil, CachePolicyRetain)
+	active, err := cm.New(ctx, nil, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 
 	m, err := active.Mount(ctx, false, nil)
@@ -290,7 +291,7 @@ func TestManager(t *testing.T) {
 	err = snap.Release(ctx)
 	require.NoError(t, err)
 
-	active2, err := cm.New(ctx, snap2, nil, CachePolicyRetain)
+	active2, err := cm.New(ctx, snap2, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 
 	checkDiskUsage(ctx, t, cm, 2, 0)
@@ -346,8 +347,8 @@ func TestLazyGetByBlob(t *testing.T) {
 	// different digests (due to different compression) and make sure GetByBlob still works
 	_, desc, err := mapToBlob(map[string]string{"foo": "bar"}, true)
 	require.NoError(t, err)
-	descHandlers := DescHandlers(make(map[digest.Digest]*DescHandler))
-	descHandlers[desc.Digest] = &DescHandler{}
+	descHandlers := cache.DescHandlers(make(map[digest.Digest]*cache.DescHandler))
+	descHandlers[desc.Digest] = &cache.DescHandler{}
 	diffID, err := diffIDFromDescriptor(desc)
 	require.NoError(t, err)
 
@@ -356,8 +357,8 @@ func TestLazyGetByBlob(t *testing.T) {
 
 	_, desc2, err := mapToBlob(map[string]string{"foo": "bar"}, false)
 	require.NoError(t, err)
-	descHandlers2 := DescHandlers(make(map[digest.Digest]*DescHandler))
-	descHandlers2[desc2.Digest] = &DescHandler{}
+	descHandlers2 := cache.DescHandlers(make(map[digest.Digest]*cache.DescHandler))
+	descHandlers2[desc2.Digest] = &cache.DescHandler{}
 	diffID2, err := diffIDFromDescriptor(desc2)
 	require.NoError(t, err)
 
@@ -388,7 +389,7 @@ func TestMergeBlobchainID(t *testing.T) {
 	// create a merge ref that has 3 inputs, with each input being a 3 layer blob chain
 	var mergeInputs []ImmutableRef
 	var descs []ocispecs.Descriptor
-	descHandlers := DescHandlers(map[digest.Digest]*DescHandler{})
+	descHandlers := cache.DescHandlers(map[digest.Digest]*cache.DescHandler{})
 	for i := 0; i < 3; i++ {
 		contentBuffer := contentutil.NewBuffer()
 		var curBlob ImmutableRef
@@ -401,7 +402,7 @@ func TestMergeBlobchainID(t *testing.T) {
 			require.NoError(t, err)
 			err = cw.Commit(ctx, 0, cw.Digest())
 			require.NoError(t, err)
-			descHandlers[desc.Digest] = &DescHandler{
+			descHandlers[desc.Digest] = &cache.DescHandler{
 				Provider: func(_ session.Group) content.Provider { return contentBuffer },
 			}
 			curBlob, err = cm.GetByBlob(ctx, desc, curBlob, descHandlers)
@@ -882,7 +883,7 @@ func TestPrune(t *testing.T) {
 	snap, err := active.Commit(ctx)
 	require.NoError(t, err)
 
-	active, err = cm.New(ctx, snap, nil, CachePolicyRetain)
+	active, err = cm.New(ctx, snap, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 
 	snap2, err := active.Commit(ctx)
@@ -928,7 +929,7 @@ func TestPrune(t *testing.T) {
 	err = snap.Release(ctx)
 	require.NoError(t, err)
 
-	active, err = cm.New(ctx, snap, nil, CachePolicyRetain)
+	active, err = cm.New(ctx, snap, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 
 	snap2, err = active.Commit(ctx)
@@ -987,7 +988,7 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 	cm := co.manager
 
-	active, err := cm.New(ctx, nil, nil, CachePolicyRetain)
+	active, err := cm.New(ctx, nil, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 
 	// after commit mutable is locked
@@ -1056,7 +1057,7 @@ func TestLazyCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	// test restarting after commit
-	active, err = cm.New(ctx, nil, nil, CachePolicyRetain)
+	active, err = cm.New(ctx, nil, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 
 	// after commit mutable is locked
@@ -1152,13 +1153,13 @@ func TestLoopLeaseContent(t *testing.T) {
 	blobBytes, orgDesc, err := mapToBlob(map[string]string{"foo": "1"}, false)
 	require.NoError(t, err)
 	contentBuffer := contentutil.NewBuffer()
-	descHandlers := DescHandlers(map[digest.Digest]*DescHandler{})
+	descHandlers := cache.DescHandlers(map[digest.Digest]*cache.DescHandler{})
 	cw, err := contentBuffer.Writer(ctx, content.WithRef(fmt.Sprintf("write-test-blob-%s", orgDesc.Digest)))
 	require.NoError(t, err)
 	_, err = cw.Write(blobBytes)
 	require.NoError(t, err)
 	require.NoError(t, cw.Commit(ctx, 0, cw.Digest()))
-	descHandlers[orgDesc.Digest] = &DescHandler{
+	descHandlers[orgDesc.Digest] = &cache.DescHandler{
 		Provider: func(_ session.Group) content.Provider { return contentBuffer },
 	}
 
@@ -1354,13 +1355,13 @@ func testSharingCompressionVariant(ctx context.Context, t *testing.T, co *cmOut,
 		})
 		require.NoError(t, err)
 		contentBuffer := contentutil.NewBuffer()
-		descHandlers := DescHandlers(map[digest.Digest]*DescHandler{})
+		descHandlers := cache.DescHandlers(map[digest.Digest]*cache.DescHandler{})
 		cw, err := contentBuffer.Writer(ctx, content.WithRef(fmt.Sprintf("write-test-blob-%s", aDesc.Digest)))
 		require.NoError(t, err)
 		_, err = cw.Write(blobBytes)
 		require.NoError(t, err)
 		require.NoError(t, cw.Commit(ctx, 0, cw.Digest()))
-		descHandlers[aDesc.Digest] = &DescHandler{
+		descHandlers[aDesc.Digest] = &cache.DescHandler{
 			Provider: func(_ session.Group) content.Provider { return contentBuffer },
 		}
 
@@ -1625,7 +1626,7 @@ func TestGetRemotes(t *testing.T) {
 
 	contentBuffer := contentutil.NewBuffer()
 
-	descHandlers := DescHandlers(map[digest.Digest]*DescHandler{})
+	descHandlers := cache.DescHandlers(map[digest.Digest]*cache.DescHandler{})
 
 	// make some lazy refs from blobs
 	expectedContent := map[digest.Digest]struct{}{}
@@ -1645,7 +1646,7 @@ func TestGetRemotes(t *testing.T) {
 		err = cw.Commit(ctx, 0, cw.Digest())
 		require.NoError(t, err)
 
-		descHandlers[desc.Digest] = &DescHandler{
+		descHandlers[desc.Digest] = &cache.DescHandler{
 			Provider: func(_ session.Group) content.Provider { return contentBuffer },
 		}
 
@@ -1923,7 +1924,7 @@ func TestNondistributableBlobs(t *testing.T) {
 	defer done(context.TODO())
 
 	contentBuffer := contentutil.NewBuffer()
-	descHandlers := DescHandlers(map[digest.Digest]*DescHandler{})
+	descHandlers := cache.DescHandlers(map[digest.Digest]*cache.DescHandler{})
 
 	data, desc, err := mapToBlob(map[string]string{"foo": "bar"}, false)
 	require.NoError(t, err)
@@ -1939,7 +1940,7 @@ func TestNondistributableBlobs(t *testing.T) {
 	err = cw.Commit(ctx, 0, cw.Digest())
 	require.NoError(t, err)
 
-	descHandlers[desc.Digest] = &DescHandler{
+	descHandlers[desc.Digest] = &cache.DescHandler{
 		Provider: func(_ session.Group) content.Provider { return contentBuffer },
 	}
 
@@ -2270,7 +2271,7 @@ func TestLoadHalfFinalizedRef(t *testing.T) {
 	t.Cleanup(cleanup)
 	cm := co.manager.(*cacheManager)
 
-	mref, err := cm.New(ctx, nil, nil, CachePolicyRetain)
+	mref, err := cm.New(ctx, nil, nil, cache.CachePolicyRetain)
 	require.NoError(t, err)
 	mutRef := mref.(*mutableRef)
 

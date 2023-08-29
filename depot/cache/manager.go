@@ -15,6 +15,7 @@ import (
 	"github.com/containerd/containerd/gc"
 	"github.com/containerd/containerd/leases"
 	"github.com/docker/docker/pkg/idtools"
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/depot/cache/metadata"
 	"github.com/moby/buildkit/identity"
@@ -51,14 +52,14 @@ type ManagerOpt struct {
 type Accessor interface {
 	MetadataStore
 
-	GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent ImmutableRef, opts ...RefOption) (ImmutableRef, error)
-	Get(ctx context.Context, id string, pg progress.Controller, opts ...RefOption) (ImmutableRef, error)
+	GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent ImmutableRef, opts ...cache.RefOption) (ImmutableRef, error)
+	Get(ctx context.Context, id string, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error)
 
-	New(ctx context.Context, parent ImmutableRef, s session.Group, opts ...RefOption) (MutableRef, error)
-	GetMutable(ctx context.Context, id string, opts ...RefOption) (MutableRef, error) // Rebase?
+	New(ctx context.Context, parent ImmutableRef, s session.Group, opts ...cache.RefOption) (MutableRef, error)
+	GetMutable(ctx context.Context, id string, opts ...cache.RefOption) (MutableRef, error) // Rebase?
 	IdentityMapping() *idtools.IdentityMapping
-	Merge(ctx context.Context, parents []ImmutableRef, pg progress.Controller, opts ...RefOption) (ImmutableRef, error)
-	Diff(ctx context.Context, lower, upper ImmutableRef, pg progress.Controller, opts ...RefOption) (ImmutableRef, error)
+	Merge(ctx context.Context, parents []ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error)
+	Diff(ctx context.Context, lower, upper ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error)
 }
 
 type Controller interface {
@@ -124,7 +125,7 @@ func NewManager(opt ManagerOpt) (Manager, error) {
 	return cm, nil
 }
 
-func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent ImmutableRef, opts ...RefOption) (ir ImmutableRef, rerr error) {
+func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent ImmutableRef, opts ...cache.RefOption) (ir ImmutableRef, rerr error) {
 	diffID, err := diffIDFromDescriptor(desc)
 	if err != nil {
 		return nil, err
@@ -143,7 +144,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 
 	var p *immutableRef
 	if parent != nil {
-		p2, err := cm.Get(ctx, parent.ID(), nil, NoUpdateLastUsed, descHandlers)
+		p2, err := cm.Get(ctx, parent.ID(), nil, cache.NoUpdateLastUsed, descHandlers)
 		if err != nil {
 			return nil, err
 		}
@@ -339,14 +340,14 @@ func (cm *cacheManager) Close() error {
 }
 
 // Get returns an immutable snapshot reference for ID
-func (cm *cacheManager) Get(ctx context.Context, id string, pg progress.Controller, opts ...RefOption) (ImmutableRef, error) {
+func (cm *cacheManager) Get(ctx context.Context, id string, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	return cm.get(ctx, id, pg, opts...)
 }
 
 // get requires manager lock to be taken
-func (cm *cacheManager) get(ctx context.Context, id string, pg progress.Controller, opts ...RefOption) (*immutableRef, error) {
+func (cm *cacheManager) get(ctx context.Context, id string, pg progress.Controller, opts ...cache.RefOption) (*immutableRef, error) {
 	rec, err := cm.getRecord(ctx, id, opts...)
 	if err != nil {
 		return nil, err
@@ -356,7 +357,7 @@ func (cm *cacheManager) get(ctx context.Context, id string, pg progress.Controll
 
 	triggerUpdate := true
 	for _, o := range opts {
-		if o == NoUpdateLastUsed {
+		if _, ok := o.(cache.NoUpdateLastUsedOpt); ok {
 			triggerUpdate = false
 		}
 	}
@@ -377,7 +378,7 @@ func (cm *cacheManager) get(ctx context.Context, id string, pg progress.Controll
 }
 
 // getRecord returns record for id. Requires manager lock.
-func (cm *cacheManager) getRecord(ctx context.Context, id string, opts ...RefOption) (cr *cacheRecord, retErr error) {
+func (cm *cacheManager) getRecord(ctx context.Context, id string, opts ...cache.RefOption) (cr *cacheRecord, retErr error) {
 	checkLazyProviders := func(rec *cacheRecord) error {
 		missing := NeedsRemoteProviderError(nil)
 		dhs := descHandlersOf(opts...)
@@ -506,14 +507,14 @@ func (cm *cacheManager) getRecord(ctx context.Context, id string, opts ...RefOpt
 	return rec, nil
 }
 
-func (cm *cacheManager) parentsOf(ctx context.Context, md *cacheMetadata, opts ...RefOption) (ps parentRefs, rerr error) {
+func (cm *cacheManager) parentsOf(ctx context.Context, md *cacheMetadata, opts ...cache.RefOption) (ps parentRefs, rerr error) {
 	defer func() {
 		if rerr != nil {
 			ps.release(context.TODO())
 		}
 	}()
 	if parentID := md.getParent(); parentID != "" {
-		p, err := cm.get(ctx, parentID, nil, append(opts, NoUpdateLastUsed))
+		p, err := cm.get(ctx, parentID, nil, append(opts, cache.NoUpdateLastUsed)...)
 		if err != nil {
 			return ps, err
 		}
@@ -521,14 +522,14 @@ func (cm *cacheManager) parentsOf(ctx context.Context, md *cacheMetadata, opts .
 		return ps, nil
 	}
 	for _, parentID := range md.getMergeParents() {
-		p, err := cm.get(ctx, parentID, nil, append(opts, NoUpdateLastUsed))
+		p, err := cm.get(ctx, parentID, nil, append(opts, cache.NoUpdateLastUsed)...)
 		if err != nil {
 			return ps, err
 		}
 		ps.mergeParents = append(ps.mergeParents, p)
 	}
 	if lowerParentID := md.getLowerDiffParent(); lowerParentID != "" {
-		p, err := cm.get(ctx, lowerParentID, nil, append(opts, NoUpdateLastUsed))
+		p, err := cm.get(ctx, lowerParentID, nil, append(opts, cache.NoUpdateLastUsed)...)
 		if err != nil {
 			return ps, err
 		}
@@ -538,7 +539,7 @@ func (cm *cacheManager) parentsOf(ctx context.Context, md *cacheMetadata, opts .
 		ps.diffParents.lower = p
 	}
 	if upperParentID := md.getUpperDiffParent(); upperParentID != "" {
-		p, err := cm.get(ctx, upperParentID, nil, append(opts, NoUpdateLastUsed))
+		p, err := cm.get(ctx, upperParentID, nil, append(opts, cache.NoUpdateLastUsed)...)
 		if err != nil {
 			return ps, err
 		}
@@ -550,7 +551,7 @@ func (cm *cacheManager) parentsOf(ctx context.Context, md *cacheMetadata, opts .
 	return ps, nil
 }
 
-func (cm *cacheManager) New(ctx context.Context, s ImmutableRef, sess session.Group, opts ...RefOption) (mr MutableRef, err error) {
+func (cm *cacheManager) New(ctx context.Context, s ImmutableRef, sess session.Group, opts ...cache.RefOption) (mr MutableRef, err error) {
 	id := identity.NewID()
 
 	var parent *immutableRef
@@ -559,7 +560,7 @@ func (cm *cacheManager) New(ctx context.Context, s ImmutableRef, sess session.Gr
 		if _, ok := s.(*immutableRef); ok {
 			parent = s.Clone().(*immutableRef)
 		} else {
-			p, err := cm.Get(ctx, s.ID(), nil, append(opts, NoUpdateLastUsed)...)
+			p, err := cm.Get(ctx, s.ID(), nil, append(opts, cache.NoUpdateLastUsed)...)
 			if err != nil {
 				return nil, err
 			}
@@ -648,14 +649,14 @@ func (cm *cacheManager) New(ctx context.Context, s ImmutableRef, sess session.Gr
 	cm.records[id] = rec // TODO: save to db
 
 	// parent refs are possibly lazy so keep it hold the description handlers.
-	var dhs DescHandlers
+	var dhs cache.DescHandlers
 	if parent != nil {
 		dhs = parent.descHandlers
 	}
 	return rec.mref(true, dhs), nil
 }
 
-func (cm *cacheManager) GetMutable(ctx context.Context, id string, opts ...RefOption) (MutableRef, error) {
+func (cm *cacheManager) GetMutable(ctx context.Context, id string, opts ...cache.RefOption) (MutableRef, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -688,7 +689,7 @@ func (cm *cacheManager) GetMutable(ctx context.Context, id string, opts ...RefOp
 	return rec.mref(true, descHandlersOf(opts...)), nil
 }
 
-func (cm *cacheManager) Merge(ctx context.Context, inputParents []ImmutableRef, pg progress.Controller, opts ...RefOption) (ir ImmutableRef, rerr error) {
+func (cm *cacheManager) Merge(ctx context.Context, inputParents []ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ir ImmutableRef, rerr error) {
 	// TODO:(sipsma) optimize merge further by
 	// * Removing repeated occurrences of input layers (only leaving the uppermost)
 	// * Reusing existing merges that are equivalent to this one
@@ -698,7 +699,7 @@ func (cm *cacheManager) Merge(ctx context.Context, inputParents []ImmutableRef, 
 	// Be sure that any optimizations handle existing pre-optimization refs correctly.
 
 	parents := parentRefs{mergeParents: make([]*immutableRef, 0, len(inputParents))}
-	dhs := make(map[digest.Digest]*DescHandler)
+	dhs := make(map[digest.Digest]*cache.DescHandler)
 	defer func() {
 		if rerr != nil {
 			parents.release(context.TODO())
@@ -714,7 +715,7 @@ func (cm *cacheManager) Merge(ctx context.Context, inputParents []ImmutableRef, 
 		} else {
 			// inputParent implements ImmutableRef but isn't our internal struct, get an instance of the internal struct
 			// by calling Get on its ID.
-			p, err := cm.Get(ctx, inputParent.ID(), nil, append(opts, NoUpdateLastUsed)...)
+			p, err := cm.Get(ctx, inputParent.ID(), nil, append(opts, cache.NoUpdateLastUsed)...)
 			if err != nil {
 				return nil, err
 			}
@@ -744,7 +745,7 @@ func (cm *cacheManager) Merge(ctx context.Context, inputParents []ImmutableRef, 
 	return mergeRef, nil
 }
 
-func (cm *cacheManager) createMergeRef(ctx context.Context, parents parentRefs, dhs DescHandlers, pg progress.Controller, opts ...RefOption) (ir *immutableRef, rerr error) {
+func (cm *cacheManager) createMergeRef(ctx context.Context, parents parentRefs, dhs cache.DescHandlers, pg progress.Controller, opts ...cache.RefOption) (ir *immutableRef, rerr error) {
 	if len(parents.mergeParents) == 0 {
 		// merge of nothing is nothing
 		return nil, nil
@@ -820,14 +821,14 @@ func (cm *cacheManager) createMergeRef(ctx context.Context, parents parentRefs, 
 	return rec.ref(true, dhs, pg), nil
 }
 
-func (cm *cacheManager) Diff(ctx context.Context, lower, upper ImmutableRef, pg progress.Controller, opts ...RefOption) (ir ImmutableRef, rerr error) {
+func (cm *cacheManager) Diff(ctx context.Context, lower, upper ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ir ImmutableRef, rerr error) {
 	if lower == nil {
 		return nil, errors.New("lower ref for diff cannot be nil")
 	}
 
 	var dps diffParents
 	parents := parentRefs{diffParents: &dps}
-	dhs := make(map[digest.Digest]*DescHandler)
+	dhs := make(map[digest.Digest]*cache.DescHandler)
 	defer func() {
 		if rerr != nil {
 			parents.release(context.TODO())
@@ -843,7 +844,7 @@ func (cm *cacheManager) Diff(ctx context.Context, lower, upper ImmutableRef, pg 
 		} else {
 			// inputParent implements ImmutableRef but isn't our internal struct, get an instance of the internal struct
 			// by calling Get on its ID.
-			p, err := cm.Get(ctx, inputParent.ID(), nil, append(opts, NoUpdateLastUsed)...)
+			p, err := cm.Get(ctx, inputParent.ID(), nil, append(opts, cache.NoUpdateLastUsed)...)
 			if err != nil {
 				return nil, err
 			}
@@ -897,7 +898,7 @@ func (cm *cacheManager) Diff(ctx context.Context, lower, upper ImmutableRef, pg 
 				} else {
 					subParents := parentRefs{diffParents: &diffParents{lower: subLower.clone(), upper: subUpper.clone()}}
 					diffRef, err := cm.createDiffRef(ctx, subParents, subUpper.descHandlers, pg,
-						WithDescription(fmt.Sprintf("diff %q -> %q", subLower.ID(), subUpper.ID())))
+						cache.WithDescription(fmt.Sprintf("diff %q -> %q", subLower.ID(), subUpper.ID())))
 					if err != nil {
 						subParents.release(context.TODO())
 						return nil, err
@@ -923,7 +924,7 @@ func (cm *cacheManager) Diff(ctx context.Context, lower, upper ImmutableRef, pg 
 	return diffRef, nil
 }
 
-func (cm *cacheManager) createDiffRef(ctx context.Context, parents parentRefs, dhs DescHandlers, pg progress.Controller, opts ...RefOption) (ir *immutableRef, rerr error) {
+func (cm *cacheManager) createDiffRef(ctx context.Context, parents parentRefs, dhs cache.DescHandlers, pg progress.Controller, opts ...cache.RefOption) (ir *immutableRef, rerr error) {
 	dps := parents.diffParents
 	if err := dps.lower.Finalize(ctx); err != nil {
 		return nil, errors.Wrapf(err, "failed to finalize lower parent during diff")
@@ -1419,7 +1420,7 @@ func (cm *cacheManager) DiskUsage(ctx context.Context, opt client.DiskUsageInfo)
 			func(d *client.UsageInfo) {
 				eg.Go(func() error {
 					cm.mu.Lock()
-					ref, err := cm.get(ctx, d.ID, nil, NoUpdateLastUsed)
+					ref, err := cm.get(ctx, d.ID, nil, cache.NoUpdateLastUsed)
 					cm.mu.Unlock()
 					if err != nil {
 						d.Size = 0
@@ -1448,8 +1449,6 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, errNotFound)
 }
 
-type RefOption interface{}
-
 type cachePolicy int
 
 const (
@@ -1457,67 +1456,28 @@ const (
 	cachePolicyRetain
 )
 
-type noUpdateLastUsed struct{}
-
-var NoUpdateLastUsed noUpdateLastUsed
-
-func CachePolicyRetain(m *cacheMetadata) error {
-	return m.SetCachePolicyRetain()
-}
-
-func CachePolicyDefault(m *cacheMetadata) error {
-	return m.SetCachePolicyDefault()
-}
-
-func WithDescription(descr string) RefOption {
-	return func(m *cacheMetadata) error {
-		return m.queueDescription(descr)
-	}
-}
-
-func WithRecordType(t client.UsageRecordType) RefOption {
-	return func(m *cacheMetadata) error {
-		return m.queueRecordType(t)
-	}
-}
-
-func WithCreationTime(tm time.Time) RefOption {
-	return func(m *cacheMetadata) error {
-		return m.queueCreatedAt(tm)
-	}
-}
-
-// Need a separate type for imageRef because it needs to be called outside
-// initializeMetadata while still being a RefOption, so wrapping it in a
-// different type ensures initializeMetadata won't catch it too and duplicate
-// setting the metadata.
-type imageRefOption func(m *cacheMetadata) error
-
-// WithImageRef appends the given imageRef to the cache ref's metadata
-func WithImageRef(imageRef string) RefOption {
-	return imageRefOption(func(m *cacheMetadata) error {
-		return m.appendImageRef(imageRef)
-	})
-}
-
-func setImageRefMetadata(m *cacheMetadata, opts ...RefOption) error {
+func setImageRefMetadata(m *cacheMetadata, opts ...cache.RefOption) error {
 	for _, opt := range opts {
-		if fn, ok := opt.(imageRefOption); ok {
-			if err := fn(m); err != nil {
+		switch opt := opt.(type) {
+		case cache.ImageRefOpt:
+			if err := m.appendImageRef(opt.ImageRef); err != nil {
+				return err
+			}
+		case cache.SnapshotIDOpt:
+			if err := m.queueSnapshotID(opt.SnapshotID); err != nil {
 				return err
 			}
 		}
 	}
+
 	return m.commitMetadata()
 }
 
-func withSnapshotID(id string) RefOption {
-	return imageRefOption(func(m *cacheMetadata) error {
-		return m.queueSnapshotID(id)
-	})
+func withSnapshotID(id string) cache.RefOption {
+	return cache.SnapshotIDOpt{SnapshotID: id}
 }
 
-func initializeMetadata(m *cacheMetadata, parents parentRefs, opts ...RefOption) error {
+func initializeMetadata(m *cacheMetadata, parents parentRefs, opts ...cache.RefOption) error {
 	if tm := m.GetCreatedAt(); !tm.IsZero() {
 		return nil
 	}
@@ -1553,10 +1513,37 @@ func initializeMetadata(m *cacheMetadata, parents parentRefs, opts ...RefOption)
 	}
 
 	for _, opt := range opts {
-		if fn, ok := opt.(func(*cacheMetadata) error); ok {
-			if err := fn(m); err != nil {
+		switch opt := opt.(type) {
+		case cache.DescriptionOpt:
+			if err := m.queueDescription(opt.Description); err != nil {
 				return err
 			}
+		case cache.RecordTypeOpt:
+			if err := m.queueRecordType(opt.RecordType); err != nil {
+				return err
+			}
+		case cache.CreationTimeOpt:
+			if err := m.queueCreatedAt(opt.CreationTime); err != nil {
+				return err
+			}
+		case cache.ImageRefOpt:
+			if err := m.appendImageRef(opt.ImageRef); err != nil {
+				return err
+			}
+		case cache.SnapshotIDOpt:
+			if err := m.queueSnapshotID(opt.SnapshotID); err != nil {
+				return err
+			}
+		case cache.CachePolicyRetainOpt:
+			if err := m.SetCachePolicyRetain(); err != nil {
+				return err
+			}
+		case cache.CachePolicyDefaultOpt:
+			if err := m.SetCachePolicyDefault(); err != nil {
+				return err
+			}
+		case cache.NoUpdateLastUsedOpt:
+			// do nothing
 		}
 	}
 

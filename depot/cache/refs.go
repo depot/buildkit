@@ -18,6 +18,7 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/hashicorp/go-multierror"
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
@@ -47,7 +48,7 @@ type Ref interface {
 	RefMetadata
 	Release(context.Context) error
 	IdentityMapping() *idtools.IdentityMapping
-	DescHandler(digest.Digest) *DescHandler
+	DescHandler(digest.Digest) *cache.DescHandler
 }
 
 type ImmutableRef interface {
@@ -100,7 +101,7 @@ type cacheRecord struct {
 }
 
 // hold ref lock before calling
-func (cr *cacheRecord) ref(triggerLastUsed bool, descHandlers DescHandlers, pg progress.Controller) *immutableRef {
+func (cr *cacheRecord) ref(triggerLastUsed bool, descHandlers cache.DescHandlers, pg progress.Controller) *immutableRef {
 	ref := &immutableRef{
 		cacheRecord:     cr,
 		triggerLastUsed: triggerLastUsed,
@@ -113,7 +114,7 @@ func (cr *cacheRecord) ref(triggerLastUsed bool, descHandlers DescHandlers, pg p
 }
 
 // hold ref lock before calling
-func (cr *cacheRecord) mref(triggerLastUsed bool, descHandlers DescHandlers) *mutableRef {
+func (cr *cacheRecord) mref(triggerLastUsed bool, descHandlers cache.DescHandlers) *mutableRef {
 	ref := &mutableRef{
 		cacheRecord:     cr,
 		triggerLastUsed: triggerLastUsed,
@@ -475,7 +476,7 @@ func (cr *cacheRecord) remove(ctx context.Context, removeSnapshot bool) (rerr er
 type immutableRef struct {
 	*cacheRecord
 	triggerLastUsed bool
-	descHandlers    DescHandlers
+	descHandlers    cache.DescHandlers
 	// TODO:(sipsma) de-dupe progress with the same field inside descHandlers?
 	progress progress.Controller
 }
@@ -610,14 +611,14 @@ func (sr *immutableRef) LayerChain() RefList {
 	return l
 }
 
-func (sr *immutableRef) DescHandler(dgst digest.Digest) *DescHandler {
+func (sr *immutableRef) DescHandler(dgst digest.Digest) *cache.DescHandler {
 	return sr.descHandlers[dgst]
 }
 
 type mutableRef struct {
 	*cacheRecord
 	triggerLastUsed bool
-	descHandlers    DescHandlers
+	descHandlers    cache.DescHandlers
 }
 
 // hold ref lock before calling
@@ -638,7 +639,7 @@ func (sr *mutableRef) traceLogFields() logrus.Fields {
 	return m
 }
 
-func (sr *mutableRef) DescHandler(dgst digest.Digest) *DescHandler {
+func (sr *mutableRef) DescHandler(dgst digest.Digest) *cache.DescHandler {
 	return sr.descHandlers[dgst]
 }
 
@@ -694,7 +695,7 @@ func layerToNonDistributable(mt string) string {
 	}
 }
 
-func (sr *immutableRef) ociDesc(ctx context.Context, dhs DescHandlers, preferNonDist bool) (ocispecs.Descriptor, error) {
+func (sr *immutableRef) ociDesc(ctx context.Context, dhs cache.DescHandlers, preferNonDist bool) (ocispecs.Descriptor, error) {
 	dgst := sr.getBlob()
 	if dgst == "" {
 		return ocispecs.Descriptor{}, errors.Errorf("no blob set for cache record %s", sr.ID())
@@ -1141,7 +1142,7 @@ func makeTmpLabelsStargzMode(labels map[string]string, s session.Group) (fields 
 	return
 }
 
-func (sr *immutableRef) unlazy(ctx context.Context, dhs DescHandlers, pg progress.Controller, s session.Group, topLevel bool) error {
+func (sr *immutableRef) unlazy(ctx context.Context, dhs cache.DescHandlers, pg progress.Controller, s session.Group, topLevel bool) error {
 	_, err := g.Do(ctx, sr.ID()+"-unlazy", func(ctx context.Context) (_ struct{}, rerr error) {
 		if _, err := sr.cm.Snapshotter.Stat(ctx, sr.getSnapshotID()); err == nil {
 			return struct{}{}, nil
@@ -1159,7 +1160,7 @@ func (sr *immutableRef) unlazy(ctx context.Context, dhs DescHandlers, pg progres
 }
 
 // should be called within sizeG.Do call for this ref's ID
-func (sr *immutableRef) unlazyDiffMerge(ctx context.Context, dhs DescHandlers, pg progress.Controller, s session.Group, topLevel bool) (rerr error) {
+func (sr *immutableRef) unlazyDiffMerge(ctx context.Context, dhs cache.DescHandlers, pg progress.Controller, s session.Group, topLevel bool) (rerr error) {
 	eg, egctx := errgroup.WithContext(ctx)
 	var diffs []snapshot.Diff
 	sr.layerWalk(func(sr *immutableRef) {
@@ -1215,7 +1216,7 @@ func (sr *immutableRef) unlazyDiffMerge(ctx context.Context, dhs DescHandlers, p
 }
 
 // should be called within sizeG.Do call for this ref's ID
-func (sr *immutableRef) unlazyLayer(ctx context.Context, dhs DescHandlers, pg progress.Controller, s session.Group) (rerr error) {
+func (sr *immutableRef) unlazyLayer(ctx context.Context, dhs cache.DescHandlers, pg progress.Controller, s session.Group) (rerr error) {
 	if !sr.getBlobOnly() {
 		return nil
 	}

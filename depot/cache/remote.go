@@ -9,6 +9,7 @@ import (
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/reference"
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
@@ -290,7 +291,7 @@ func (mp *lazyMultiProvider) Unlazy(ctx context.Context) error {
 type lazyRefProvider struct {
 	ref     *immutableRef
 	desc    ocispecs.Descriptor
-	dh      *DescHandler
+	dh      *cache.DescHandler
 	session session.Group
 }
 

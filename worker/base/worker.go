@@ -108,7 +108,7 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 		err error
 	)
 
-	if os.Getenv("DEPOT_MANAGER") != "" {
+	if os.Getenv("DEPOT_MANAGER") == "" {
 		bklog.G(ctx).Infof("using depot cache manager")
 		metadataStore := depotmetadata.FromCacheMetadataStore(opt.MetadataStore)
 		cm, err = depotcache.NewManager(depotcache.ManagerOpt{

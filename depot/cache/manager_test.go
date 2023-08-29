@@ -238,7 +238,7 @@ func TestManager(t *testing.T) {
 
 	_, err = cm.GetMutable(ctx, active.ID())
 	require.Error(t, err)
-	require.Equal(t, true, errors.Is(err, ErrLocked))
+	require.Equal(t, true, errors.Is(err, cache.ErrLocked))
 
 	checkDiskUsage(ctx, t, cm, 1, 0)
 
@@ -249,7 +249,7 @@ func TestManager(t *testing.T) {
 
 	_, err = cm.GetMutable(ctx, active.ID())
 	require.Error(t, err)
-	require.Equal(t, true, errors.Is(err, ErrLocked))
+	require.Equal(t, true, errors.Is(err, cache.ErrLocked))
 
 	err = snap.Release(ctx)
 	require.NoError(t, err)
@@ -997,7 +997,7 @@ func TestLazyCommit(t *testing.T) {
 
 	_, err = cm.GetMutable(ctx, active.ID())
 	require.Error(t, err)
-	require.Equal(t, true, errors.Is(err, ErrLocked))
+	require.Equal(t, true, errors.Is(err, cache.ErrLocked))
 
 	// immutable refs still work
 	snap2, err := cm.Get(ctx, snap.ID(), nil)
@@ -1018,7 +1018,7 @@ func TestLazyCommit(t *testing.T) {
 	// active can't be get while immutable is held
 	_, err = cm.GetMutable(ctx, active.ID())
 	require.Error(t, err)
-	require.Equal(t, true, errors.Is(err, ErrLocked))
+	require.Equal(t, true, errors.Is(err, cache.ErrLocked))
 
 	err = snap.Release(ctx)
 	require.NoError(t, err)

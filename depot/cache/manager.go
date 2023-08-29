@@ -32,7 +32,6 @@ import (
 )
 
 var (
-	ErrLocked   = errors.New("locked")
 	errNotFound = errors.New("not found")
 	errInvalid  = errors.New("invalid")
 )
@@ -106,7 +105,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 	descHandlers := descHandlersOf(opts...)
 	if desc.Digest != "" && (descHandlers == nil || descHandlers[desc.Digest] == nil) {
 		if _, err := cm.ContentStore.Info(ctx, desc.Digest); errors.Is(err, errdefs.ErrNotFound) {
-			return nil, NeedsRemoteProviderError([]digest.Digest{desc.Digest})
+			return nil, cache.NeedsRemoteProviderError([]digest.Digest{desc.Digest})
 		} else if err != nil {
 			return nil, err
 		}
@@ -151,7 +150,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 	for _, si := range sis {
 		ref, err := cm.get(ctx, si.ID(), nil, opts...)
 		if err != nil {
-			if errors.As(err, &NeedsRemoteProviderError{}) {
+			if errors.As(err, &cache.NeedsRemoteProviderError{}) {
 				// This shouldn't happen and indicates that blobchain IDs are being set incorrectly,
 				// but if it does happen it's not fatal as we can just not try to re-use by blobchainID.
 				// Log the error but continue.
@@ -181,7 +180,7 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 	for _, si := range sis {
 		ref, err := cm.get(ctx, si.ID(), nil, opts...)
 		// if the error was NotFound or NeedsRemoteProvider, we can't re-use the snapshot from the blob so just skip it
-		if err != nil && !IsNotFound(err) && !errors.As(err, &NeedsRemoteProviderError{}) {
+		if err != nil && !IsNotFound(err) && !errors.As(err, &cache.NeedsRemoteProviderError{}) {
 			return nil, errors.Wrapf(err, "failed to get record %s by chainid", si.ID())
 		}
 		if ref != nil {
@@ -336,7 +335,7 @@ func (cm *cacheManager) get(ctx context.Context, id string, pg progress.Controll
 
 	if rec.mutable {
 		if len(rec.refs) != 0 {
-			return nil, errors.Wrapf(ErrLocked, "%s is locked", id)
+			return nil, errors.Wrapf(cache.ErrLocked, "%s is locked", id)
 		}
 		if rec.equalImmutable != nil {
 			return rec.equalImmutable.ref(triggerUpdate, descHandlers, pg), nil
@@ -350,7 +349,7 @@ func (cm *cacheManager) get(ctx context.Context, id string, pg progress.Controll
 // getRecord returns record for id. Requires manager lock.
 func (cm *cacheManager) getRecord(ctx context.Context, id string, opts ...cache.RefOption) (cr *cacheRecord, retErr error) {
 	checkLazyProviders := func(rec *cacheRecord) error {
-		missing := NeedsRemoteProviderError(nil)
+		missing := cache.NeedsRemoteProviderError(nil)
 		dhs := descHandlersOf(opts...)
 		if err := rec.walkUniqueAncestors(func(cr *cacheRecord) error {
 			blob := cr.getBlob()
@@ -642,12 +641,12 @@ func (cm *cacheManager) GetMutable(ctx context.Context, id string, opts ...cache
 	}
 
 	if len(rec.refs) != 0 {
-		return nil, errors.Wrapf(ErrLocked, "%s is locked", id)
+		return nil, errors.Wrapf(cache.ErrLocked, "%s is locked", id)
 	}
 
 	if rec.equalImmutable != nil {
 		if len(rec.equalImmutable.refs) != 0 {
-			return nil, errors.Wrapf(ErrLocked, "%s is locked", id)
+			return nil, errors.Wrapf(cache.ErrLocked, "%s is locked", id)
 		}
 		delete(cm.records, rec.equalImmutable.ID())
 		if err := rec.equalImmutable.remove(ctx, false); err != nil {

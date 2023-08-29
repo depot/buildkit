@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/depot/cache/metadata"
 	"github.com/moby/buildkit/util/bklog"
@@ -79,19 +80,19 @@ type RefMetadata interface {
 	ClearValueAndIndex(string, string) error
 }
 
-func (cm *cacheManager) Search(ctx context.Context, idx string) ([]RefMetadata, error) {
+func (cm *cacheManager) Search(ctx context.Context, idx string) ([]cache.RefMetadata, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	return cm.search(ctx, idx)
 }
 
 // callers must hold cm.mu lock
-func (cm *cacheManager) search(ctx context.Context, idx string) ([]RefMetadata, error) {
+func (cm *cacheManager) search(ctx context.Context, idx string) ([]cache.RefMetadata, error) {
 	sis, err := cm.MetadataStore.Search(ctx, idx)
 	if err != nil {
 		return nil, err
 	}
-	var mds []RefMetadata
+	var mds []cache.RefMetadata
 	for _, si := range sis {
 		// calling getMetadata ensures we return the same storage item object that's cached in memory
 		md, ok := cm.getMetadata(si.ID())
@@ -118,12 +119,12 @@ func (cm *cacheManager) getMetadata(id string) (*cacheMetadata, bool) {
 }
 
 // callers must hold cm.mu lock
-func (cm *cacheManager) searchBlobchain(ctx context.Context, id digest.Digest) ([]RefMetadata, error) {
+func (cm *cacheManager) searchBlobchain(ctx context.Context, id digest.Digest) ([]cache.RefMetadata, error) {
 	return cm.search(ctx, blobchainIndex+id.String())
 }
 
 // callers must hold cm.mu lock
-func (cm *cacheManager) searchChain(ctx context.Context, id digest.Digest) ([]RefMetadata, error) {
+func (cm *cacheManager) searchChain(ctx context.Context, id digest.Digest) ([]cache.RefMetadata, error) {
 	return cm.search(ctx, chainIndex+id.String())
 }
 
@@ -215,7 +216,7 @@ func (md *cacheMetadata) SetExternal(s string, dt []byte) error {
 	return md.si.SetExternal(s, dt)
 }
 
-func (md *cacheMetadata) GetEqualMutable() (RefMetadata, bool) {
+func (md *cacheMetadata) GetEqualMutable() (cache.RefMetadata, bool) {
 	emSi, ok := md.si.Storage().Get(md.getEqualMutable())
 	if !ok {
 		return nil, false

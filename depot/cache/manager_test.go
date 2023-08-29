@@ -65,7 +65,7 @@ type cmOpt struct {
 }
 
 type cmOut struct {
-	manager Manager
+	manager cache.Manager
 	lm      leases.Manager
 	cs      content.Store
 }
@@ -387,12 +387,12 @@ func TestMergeBlobchainID(t *testing.T) {
 	cm := co.manager
 
 	// create a merge ref that has 3 inputs, with each input being a 3 layer blob chain
-	var mergeInputs []ImmutableRef
+	var mergeInputs []cache.ImmutableRef
 	var descs []ocispecs.Descriptor
 	descHandlers := cache.DescHandlers(map[digest.Digest]*cache.DescHandler{})
 	for i := 0; i < 3; i++ {
 		contentBuffer := contentutil.NewBuffer()
-		var curBlob ImmutableRef
+		var curBlob cache.ImmutableRef
 		for j := 0; j < 3; j++ {
 			blobBytes, desc, err := mapToBlob(map[string]string{strconv.Itoa(i): strconv.Itoa(j)}, true)
 			require.NoError(t, err)
@@ -426,7 +426,7 @@ func TestMergeBlobchainID(t *testing.T) {
 	}
 
 	// verify you get the merge ref when asking for an equivalent blob chain
-	var curBlob ImmutableRef
+	var curBlob cache.ImmutableRef
 	for _, desc := range descs[:len(descs)-1] {
 		curBlob, err = cm.GetByBlob(ctx, desc, curBlob, descHandlers)
 		require.NoError(t, err)
@@ -1166,7 +1166,7 @@ func TestLoopLeaseContent(t *testing.T) {
 	// Create a compression loop
 	ref, err := cm.GetByBlob(ctx, orgDesc, nil, descHandlers)
 	require.NoError(t, err)
-	allRefs := []ImmutableRef{ref}
+	allRefs := []cache.ImmutableRef{ref}
 	defer func() {
 		for _, ref := range allRefs {
 			ref.Release(ctx)
@@ -1440,7 +1440,7 @@ func testSharingCompressionVariant(ctx context.Context, t *testing.T, co *cmOut,
 	}
 }
 
-func ensurePrune(ctx context.Context, t *testing.T, cm Manager, pruneNum, maxRetry int) {
+func ensurePrune(ctx context.Context, t *testing.T, cm cache.Manager, pruneNum, maxRetry int) {
 	sum := 0
 	for i := 0; i <= maxRetry; i++ {
 		buf := pruneResultBuffer()
@@ -1668,9 +1668,9 @@ func TestGetRemotes(t *testing.T) {
 	lazyRef, err := cm.GetByBlob(ctx, descs[0], nil, descHandlers)
 	require.NoError(t, err)
 
-	refs := []ImmutableRef{lazyRef}
+	refs := []cache.ImmutableRef{lazyRef}
 	for i := 0; i < 3; i++ {
-		var newRefs []ImmutableRef
+		var newRefs []cache.ImmutableRef
 		for j, ir := range refs {
 			for k := 0; k < 2; k++ {
 				mutRef, err := cm.New(ctx, ir, nil, descHandlers)
@@ -2051,7 +2051,7 @@ func TestMergeOp(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, emptyMerge)
 
-	var baseRefs []ImmutableRef
+	var baseRefs []cache.ImmutableRef
 	for i := 0; i < 6; i++ {
 		active, err := cm.New(ctx, nil, nil)
 		require.NoError(t, err)
@@ -2121,7 +2121,7 @@ func TestMergeOp(t *testing.T) {
 	checkDiskUsage(ctx, t, cm, 8, 0)
 	// should still be able to use merges based on released refs
 
-	merge3, err := cm.Merge(ctx, []ImmutableRef{merge1, merge2}, nil)
+	merge3, err := cm.Merge(ctx, []cache.ImmutableRef{merge1, merge2}, nil)
 	require.NoError(t, err)
 	require.True(t, merge3.(*immutableRef).getCommitted())
 	require.NoError(t, merge1.Release(ctx))
@@ -2428,7 +2428,7 @@ func TestLoadBrokenParents(t *testing.T) {
 	refB, err := mutRef.Commit(ctx)
 	require.NoError(t, err)
 
-	_, err = cm.Merge(ctx, []ImmutableRef{refA, refB}, nil)
+	_, err = cm.Merge(ctx, []cache.ImmutableRef{refA, refB}, nil)
 	require.NoError(t, err)
 	checkDiskUsage(ctx, t, cm, 3, 0)
 
@@ -2453,7 +2453,7 @@ func TestLoadBrokenParents(t *testing.T) {
 	require.Len(t, refA.(*immutableRef).refs, 1)
 }
 
-func checkDiskUsage(ctx context.Context, t *testing.T, cm Manager, inuse, unused int) {
+func checkDiskUsage(ctx context.Context, t *testing.T, cm cache.Manager, inuse, unused int) {
 	du, err := cm.DiskUsage(ctx, client.DiskUsageInfo{})
 	require.NoError(t, err)
 	var inuseActual, unusedActual int

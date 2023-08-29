@@ -41,42 +41,12 @@ type ManagerOpt struct {
 	Snapshotter     snapshot.Snapshotter
 	ContentStore    content.Store
 	LeaseManager    leases.Manager
-	PruneRefChecker ExternalRefCheckerFunc
+	PruneRefChecker cache.ExternalRefCheckerFunc
 	GarbageCollect  func(ctx context.Context) (gc.Stats, error)
 	Applier         diff.Applier
 	Differ          diff.Comparer
 	MetadataStore   *metadata.Store
 	MountPoolRoot   string
-}
-
-type Accessor interface {
-	MetadataStore
-
-	GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent ImmutableRef, opts ...cache.RefOption) (ImmutableRef, error)
-	Get(ctx context.Context, id string, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error)
-
-	New(ctx context.Context, parent ImmutableRef, s session.Group, opts ...cache.RefOption) (MutableRef, error)
-	GetMutable(ctx context.Context, id string, opts ...cache.RefOption) (MutableRef, error) // Rebase?
-	IdentityMapping() *idtools.IdentityMapping
-	Merge(ctx context.Context, parents []ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error)
-	Diff(ctx context.Context, lower, upper ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error)
-}
-
-type Controller interface {
-	DiskUsage(ctx context.Context, info client.DiskUsageInfo) ([]*client.UsageInfo, error)
-	Prune(ctx context.Context, ch chan client.UsageInfo, info ...client.PruneInfo) error
-}
-
-type Manager interface {
-	Accessor
-	Controller
-	Close() error
-}
-
-type ExternalRefCheckerFunc func() (ExternalRefChecker, error)
-
-type ExternalRefChecker interface {
-	Exists(string, []digest.Digest) bool
 }
 
 type cacheManager struct {
@@ -85,7 +55,7 @@ type cacheManager struct {
 	Snapshotter     snapshot.MergeSnapshotter
 	ContentStore    content.Store
 	LeaseManager    leases.Manager
-	PruneRefChecker ExternalRefCheckerFunc
+	PruneRefChecker cache.ExternalRefCheckerFunc
 	GarbageCollect  func(ctx context.Context) (gc.Stats, error)
 	Applier         diff.Applier
 	Differ          diff.Comparer
@@ -97,7 +67,7 @@ type cacheManager struct {
 	unlazyG flightcontrol.Group[struct{}]
 }
 
-func NewManager(opt ManagerOpt) (Manager, error) {
+func NewManager(opt ManagerOpt) (cache.Manager, error) {
 	cm := &cacheManager{
 		Snapshotter:     snapshot.NewMergeSnapshotter(context.TODO(), opt.Snapshotter, opt.LeaseManager),
 		ContentStore:    opt.ContentStore,
@@ -125,7 +95,7 @@ func NewManager(opt ManagerOpt) (Manager, error) {
 	return cm, nil
 }
 
-func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent ImmutableRef, opts ...cache.RefOption) (ir ImmutableRef, rerr error) {
+func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor, parent cache.ImmutableRef, opts ...cache.RefOption) (ir cache.ImmutableRef, rerr error) {
 	diffID, err := diffIDFromDescriptor(desc)
 	if err != nil {
 		return nil, err
@@ -340,7 +310,7 @@ func (cm *cacheManager) Close() error {
 }
 
 // Get returns an immutable snapshot reference for ID
-func (cm *cacheManager) Get(ctx context.Context, id string, pg progress.Controller, opts ...cache.RefOption) (ImmutableRef, error) {
+func (cm *cacheManager) Get(ctx context.Context, id string, pg progress.Controller, opts ...cache.RefOption) (cache.ImmutableRef, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	return cm.get(ctx, id, pg, opts...)
@@ -551,7 +521,7 @@ func (cm *cacheManager) parentsOf(ctx context.Context, md *cacheMetadata, opts .
 	return ps, nil
 }
 
-func (cm *cacheManager) New(ctx context.Context, s ImmutableRef, sess session.Group, opts ...cache.RefOption) (mr MutableRef, err error) {
+func (cm *cacheManager) New(ctx context.Context, s cache.ImmutableRef, sess session.Group, opts ...cache.RefOption) (mr cache.MutableRef, err error) {
 	id := identity.NewID()
 
 	var parent *immutableRef
@@ -656,7 +626,7 @@ func (cm *cacheManager) New(ctx context.Context, s ImmutableRef, sess session.Gr
 	return rec.mref(true, dhs), nil
 }
 
-func (cm *cacheManager) GetMutable(ctx context.Context, id string, opts ...cache.RefOption) (MutableRef, error) {
+func (cm *cacheManager) GetMutable(ctx context.Context, id string, opts ...cache.RefOption) (cache.MutableRef, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -689,7 +659,7 @@ func (cm *cacheManager) GetMutable(ctx context.Context, id string, opts ...cache
 	return rec.mref(true, descHandlersOf(opts...)), nil
 }
 
-func (cm *cacheManager) Merge(ctx context.Context, inputParents []ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ir ImmutableRef, rerr error) {
+func (cm *cacheManager) Merge(ctx context.Context, inputParents []cache.ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ir cache.ImmutableRef, rerr error) {
 	// TODO:(sipsma) optimize merge further by
 	// * Removing repeated occurrences of input layers (only leaving the uppermost)
 	// * Reusing existing merges that are equivalent to this one
@@ -821,7 +791,7 @@ func (cm *cacheManager) createMergeRef(ctx context.Context, parents parentRefs, 
 	return rec.ref(true, dhs, pg), nil
 }
 
-func (cm *cacheManager) Diff(ctx context.Context, lower, upper ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ir ImmutableRef, rerr error) {
+func (cm *cacheManager) Diff(ctx context.Context, lower, upper cache.ImmutableRef, pg progress.Controller, opts ...cache.RefOption) (ir cache.ImmutableRef, rerr error) {
 	if lower == nil {
 		return nil, errors.New("lower ref for diff cannot be nil")
 	}
@@ -834,7 +804,7 @@ func (cm *cacheManager) Diff(ctx context.Context, lower, upper ImmutableRef, pg 
 			parents.release(context.TODO())
 		}
 	}()
-	for i, inputParent := range []ImmutableRef{lower, upper} {
+	for i, inputParent := range []cache.ImmutableRef{lower, upper} {
 		if inputParent == nil {
 			continue
 		}
@@ -1023,7 +993,7 @@ func (cm *cacheManager) pruneOnce(ctx context.Context, ch chan client.UsageInfo,
 		return errors.Wrapf(err, "failed to parse prune filters %v", opt.Filter)
 	}
 
-	var check ExternalRefChecker
+	var check cache.ExternalRefChecker
 	if f := cm.PruneRefChecker; f != nil && (!opt.All || len(opt.Filter) > 0) {
 		c, err := f()
 		if err != nil {
@@ -1586,7 +1556,7 @@ func adaptUsageInfo(info *client.UsageInfo) filters.Adaptor {
 type pruneOpt struct {
 	filter       filters.Filter
 	all          bool
-	checkShared  ExternalRefChecker
+	checkShared  cache.ExternalRefChecker
 	keepDuration time.Duration
 	keepBytes    int64
 	totalSize    int64

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	cachemetadata "github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/pkg/errors"
 	bolt "go.etcd.io/bbolt"
@@ -30,6 +31,10 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, errors.Wrapf(err, "failed to open database file %s", dbPath)
 	}
 	return &Store{db: db}, nil
+}
+
+func FromCacheMetadataStore(store *cachemetadata.Store) *Store {
+	return &Store{store.DB()}
 }
 
 func (s *Store) DB() *bolt.DB {

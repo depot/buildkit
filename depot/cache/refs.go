@@ -19,11 +19,9 @@ import (
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/hashicorp/go-multierror"
 	"github.com/moby/buildkit/cache"
-	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
-	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/flightcontrol"
@@ -41,37 +39,6 @@ import (
 )
 
 var additionalAnnotations = append(compression.EStargzAnnotations, containerdUncompressed)
-
-// Ref is a reference to cacheable objects.
-type Ref interface {
-	Mountable
-	RefMetadata
-	Release(context.Context) error
-	IdentityMapping() *idtools.IdentityMapping
-	DescHandler(digest.Digest) *cache.DescHandler
-}
-
-type ImmutableRef interface {
-	Ref
-	Clone() ImmutableRef
-	// Finalize commits the snapshot to the driver if it's not already.
-	// This means the snapshot can no longer be mounted as mutable.
-	Finalize(context.Context) error
-
-	Extract(ctx context.Context, s session.Group) error // +progress
-	GetRemotes(ctx context.Context, createIfNeeded bool, cfg config.RefConfig, all bool, s session.Group) ([]*solver.Remote, error)
-	LayerChain() RefList
-	FileList(ctx context.Context, s session.Group) ([]string, error)
-}
-
-type MutableRef interface {
-	Ref
-	Commit(context.Context) (ImmutableRef, error)
-}
-
-type Mountable interface {
-	Mount(ctx context.Context, readonly bool, s session.Group) (snapshot.Mountable, error)
-}
 
 type ref interface {
 	shouldUpdateLastUsed() bool
@@ -586,25 +553,9 @@ func (cr *cacheRecord) layerDigestChain() []digest.Digest {
 	return cr.layerDigestChainCache
 }
 
-type RefList []ImmutableRef
-
-func (l RefList) Release(ctx context.Context) (rerr error) {
-	for i, r := range l {
-		if r == nil {
-			continue
-		}
-		if err := r.Release(ctx); err != nil {
-			rerr = multierror.Append(rerr, err).ErrorOrNil()
-		} else {
-			l[i] = nil
-		}
-	}
-	return rerr
-}
-
-func (sr *immutableRef) LayerChain() RefList {
+func (sr *immutableRef) LayerChain() cache.RefList {
 	chain := sr.layerChain()
-	l := RefList(make([]ImmutableRef, len(chain)))
+	l := cache.RefList(make([]cache.ImmutableRef, len(chain)))
 	for i, p := range chain {
 		l[i] = p.Clone()
 	}
@@ -650,7 +601,7 @@ func (sr *immutableRef) clone() *immutableRef {
 	return ref
 }
 
-func (sr *immutableRef) Clone() ImmutableRef {
+func (sr *immutableRef) Clone() cache.ImmutableRef {
 	return sr.clone()
 }
 
@@ -1513,7 +1464,7 @@ func (sr *mutableRef) Mount(ctx context.Context, readonly bool, s session.Group)
 	return mnt, nil
 }
 
-func (sr *mutableRef) Commit(ctx context.Context) (ImmutableRef, error) {
+func (sr *mutableRef) Commit(ctx context.Context) (cache.ImmutableRef, error) {
 	sr.cm.mu.Lock()
 	defer sr.cm.mu.Unlock()
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/config"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/util/compression"
@@ -47,7 +48,7 @@ func needsForceCompression(ctx context.Context, cs content.Store, source ocispec
 // 1. Extracts nydus bootstrap from nydus format (nydus blob + nydus bootstrap) for each layer.
 // 2. Merge all nydus bootstraps into a final bootstrap (will as an extra layer).
 // The nydus bootstrap size is very small, so the merge operation is fast.
-func MergeNydus(ctx context.Context, ref ImmutableRef, comp compression.Config, s session.Group) (*ocispecs.Descriptor, error) {
+func MergeNydus(ctx context.Context, ref cache.ImmutableRef, comp compression.Config, s session.Group) (*ocispecs.Descriptor, error) {
 	iref, ok := ref.(*immutableRef)
 	if !ok {
 		return nil, errors.Errorf("unsupported ref type %T", ref)

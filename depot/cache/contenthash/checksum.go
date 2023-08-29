@@ -13,6 +13,7 @@ import (
 	iradix "github.com/hashicorp/go-immutable-radix"
 	"github.com/hashicorp/golang-lru/simplelru"
 	"github.com/moby/buildkit/cache"
+	cachecontenthash "github.com/moby/buildkit/cache/contenthash"
 	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
@@ -77,7 +78,7 @@ type Hashed interface {
 
 type includedPath struct {
 	path             string
-	record           *CacheRecord
+	record           *cachecontenthash.CacheRecord
 	included         bool
 	includeMatchInfo patternmatcher.MatchInfo
 	excludeMatchInfo patternmatcher.MatchInfo
@@ -240,7 +241,7 @@ func (cc *cacheContext) load() error {
 		return nil
 	}
 
-	var l CacheRecords
+	var l cachecontenthash.CacheRecords
 	if err := l.Unmarshal(dt); err != nil {
 		return err
 	}
@@ -261,12 +262,12 @@ func (cc *cacheContext) save() error {
 		cc.commitActiveTransaction()
 	}
 
-	var l CacheRecords
+	var l cachecontenthash.CacheRecords
 	node := cc.tree.Root()
 	node.Walk(func(k []byte, v interface{}) bool {
-		l.Paths = append(l.Paths, &CacheRecordWithPath{
+		l.Paths = append(l.Paths, &cachecontenthash.CacheRecordWithPath{
 			Path:   string(k),
-			Record: v.(*CacheRecord),
+			Record: v.(*cachecontenthash.CacheRecord),
 		})
 		return false
 	})
@@ -292,8 +293,8 @@ func (cc *cacheContext) HandleChange(kind fsutil.ChangeKind, p string, fi os.Fil
 	p = keyPath(p)
 	k := convertPathToKey([]byte(p))
 
-	deleteDir := func(cr *CacheRecord) {
-		if cr.Type == CacheRecordTypeDir {
+	deleteDir := func(cr *cachecontenthash.CacheRecord) {
+		if cr.Type == cachecontenthash.CacheRecordTypeDir {
 			cc.node.WalkPrefix(append(k, 0), func(k []byte, v interface{}) bool {
 				cc.txn.Delete(k)
 				return false
@@ -309,12 +310,12 @@ func (cc *cacheContext) HandleChange(kind fsutil.ChangeKind, p string, fi os.Fil
 
 		// root is not called by HandleChange. need to fake it
 		if _, ok := cc.node.Get([]byte{0}); !ok {
-			cc.txn.Insert([]byte{0}, &CacheRecord{
-				Type:   CacheRecordTypeDirHeader,
+			cc.txn.Insert([]byte{0}, &cachecontenthash.CacheRecord{
+				Type:   cachecontenthash.CacheRecordTypeDirHeader,
 				Digest: digest.FromBytes(nil),
 			})
-			cc.txn.Insert([]byte(""), &CacheRecord{
-				Type: CacheRecordTypeDir,
+			cc.txn.Insert([]byte(""), &cachecontenthash.CacheRecord{
+				Type: cachecontenthash.CacheRecordTypeDir,
 			})
 		}
 	}
@@ -322,7 +323,7 @@ func (cc *cacheContext) HandleChange(kind fsutil.ChangeKind, p string, fi os.Fil
 	if kind == fsutil.ChangeKindDelete {
 		v, ok := cc.txn.Delete(k)
 		if ok {
-			deleteDir(v.(*CacheRecord))
+			deleteDir(v.(*cachecontenthash.CacheRecord))
 		}
 		d := path.Dir(p)
 		if d == "/" {
@@ -344,20 +345,20 @@ func (cc *cacheContext) HandleChange(kind fsutil.ChangeKind, p string, fi os.Fil
 
 	v, ok := cc.node.Get(k)
 	if ok {
-		deleteDir(v.(*CacheRecord))
+		deleteDir(v.(*cachecontenthash.CacheRecord))
 	}
 
-	cr := &CacheRecord{
-		Type: CacheRecordTypeFile,
+	cr := &cachecontenthash.CacheRecord{
+		Type: cachecontenthash.CacheRecordTypeFile,
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		cr.Type = CacheRecordTypeSymlink
+		cr.Type = cachecontenthash.CacheRecordTypeSymlink
 		cr.Linkname = filepath.ToSlash(stat.Linkname)
 	}
 	if fi.IsDir() {
-		cr.Type = CacheRecordTypeDirHeader
-		cr2 := &CacheRecord{
-			Type: CacheRecordTypeDir,
+		cr.Type = cachecontenthash.CacheRecordTypeDirHeader
+		cr2 := &cachecontenthash.CacheRecord{
+			Type: cachecontenthash.CacheRecordTypeDir,
 		}
 		cc.txn.Insert(k, cr2)
 		k = append(k, 0)
@@ -371,7 +372,7 @@ func (cc *cacheContext) HandleChange(kind fsutil.ChangeKind, p string, fi os.Fil
 		ln := path.Join("/", filepath.ToSlash(stat.Linkname))
 		v, ok := cc.txn.Get(convertPathToKey([]byte(ln)))
 		if ok {
-			cp := *v.(*CacheRecord)
+			cp := *v.(*cachecontenthash.CacheRecord)
 			cr = &cp
 		}
 		cc.linkMap[ln] = append(cc.linkMap[ln], k)
@@ -417,12 +418,12 @@ func (cc *cacheContext) Checksum(ctx context.Context, mountable cache.Mountable,
 
 	if opts.FollowLinks {
 		for i, w := range includedPaths {
-			if w.record.Type == CacheRecordTypeSymlink {
+			if w.record.Type == cachecontenthash.CacheRecordTypeSymlink {
 				dgst, err := cc.checksumFollow(ctx, m, w.path, opts.FollowLinks)
 				if err != nil {
 					return "", err
 				}
-				includedPaths[i].record = &CacheRecord{Digest: dgst}
+				includedPaths[i].record = &cachecontenthash.CacheRecord{Digest: dgst}
 			}
 		}
 	}
@@ -456,7 +457,7 @@ func (cc *cacheContext) checksumFollow(ctx context.Context, m *mount, p string, 
 		if err != nil {
 			return "", err
 		}
-		if cr.Type == CacheRecordTypeSymlink && follow {
+		if cr.Type == cachecontenthash.CacheRecordTypeSymlink && follow {
 			link := cr.Linkname
 			if !path.IsAbs(cr.Linkname) {
 				link = path.Join(path.Dir(p), link)
@@ -541,7 +542,7 @@ func (cc *cacheContext) includedPaths(ctx context.Context, m *mount, p string, o
 		// We need to resolve symlinks here, in case the base path
 		// involves a symlink. That will match fsutil behavior of
 		// calling functions such as stat and walk.
-		var cr *CacheRecord
+		var cr *cachecontenthash.CacheRecord
 		k, cr, err = getFollowLinks(root, k, true)
 		if err != nil {
 			return nil, err
@@ -659,7 +660,7 @@ func (cc *cacheContext) includedPaths(ctx context.Context, m *mount, p string, o
 			updated = true
 		}
 
-		if cr.Type == CacheRecordTypeDir {
+		if cr.Type == cachecontenthash.CacheRecordTypeDir {
 			// We only hash dir headers and files, not dir contents. Hashing
 			// dir contents could be wrong if there are exclusions within the
 			// dir.
@@ -678,7 +679,7 @@ func (cc *cacheContext) includedPaths(ctx context.Context, m *mount, p string, o
 			maybeIncludedPath.included = true
 		}
 
-		if cr.Type == CacheRecordTypeDirHeader {
+		if cr.Type == cachecontenthash.CacheRecordTypeDirHeader {
 			// We keep track of parent dir headers whether
 			// they are immediately included or not, in case
 			// an include pattern matches a file inside one
@@ -757,7 +758,7 @@ func wildcardPrefix(root *iradix.Node, p string) (string, []byte, bool, error) {
 		return "", k, false, err
 	}
 
-	if d2 != "" && cr != nil && cr.Type == CacheRecordTypeSymlink {
+	if d2 != "" && cr != nil && cr.Type == cachecontenthash.CacheRecordTypeSymlink {
 		// getFollowLinks only handles symlinks in path
 		// components before the last component, so
 		// handle last component in d1 specially.
@@ -768,7 +769,7 @@ func wildcardPrefix(root *iradix.Node, p string) (string, []byte, bool, error) {
 			if !ok {
 				return d1, k, false, nil
 			}
-			if v.(*CacheRecord).Type != CacheRecordTypeSymlink {
+			if v.(*cachecontenthash.CacheRecord).Type != cachecontenthash.CacheRecordTypeSymlink {
 				break
 			}
 
@@ -777,7 +778,7 @@ func wildcardPrefix(root *iradix.Node, p string) (string, []byte, bool, error) {
 				return "", k, false, errors.Errorf("too many links")
 			}
 
-			resolved := cleanLink(resolved, v.(*CacheRecord).Linkname)
+			resolved := cleanLink(resolved, v.(*cachecontenthash.CacheRecord).Linkname)
 			k = convertPathToKey([]byte(resolved))
 		}
 	}
@@ -816,7 +817,7 @@ func containsWildcards(name string) bool {
 	return false
 }
 
-func (cc *cacheContext) checksumNoFollow(ctx context.Context, m *mount, p string) (*CacheRecord, error) {
+func (cc *cacheContext) checksumNoFollow(ctx context.Context, m *mount, p string) (*cachecontenthash.CacheRecord, error) {
 	p = keyPath(p)
 
 	cc.mu.RLock()
@@ -825,7 +826,7 @@ func (cc *cacheContext) checksumNoFollow(ctx context.Context, m *mount, p string
 		cc.mu.RUnlock()
 		v, ok := root.Get(convertPathToKey([]byte(p)))
 		if ok {
-			cr := v.(*CacheRecord)
+			cr := v.(*cachecontenthash.CacheRecord)
 			if cr.Digest != "" {
 				return cr, nil
 			}
@@ -858,7 +859,7 @@ func (cc *cacheContext) commitActiveTransaction() {
 	for d := range cc.dirtyMap {
 		k := convertPathToKey([]byte(d))
 		if _, ok := cc.txn.Get(k); ok {
-			cc.txn.Insert(k, &CacheRecord{Type: CacheRecordTypeDir})
+			cc.txn.Insert(k, &cachecontenthash.CacheRecord{Type: cachecontenthash.CacheRecordTypeDir})
 		}
 	}
 	cc.tree = cc.txn.Commit()
@@ -867,7 +868,7 @@ func (cc *cacheContext) commitActiveTransaction() {
 	cc.txn = nil
 }
 
-func (cc *cacheContext) lazyChecksum(ctx context.Context, m *mount, p string) (*CacheRecord, error) {
+func (cc *cacheContext) lazyChecksum(ctx context.Context, m *mount, p string) (*cachecontenthash.CacheRecord, error) {
 	root := cc.tree.Root()
 	scan, err := cc.needsScan(root, p)
 	if err != nil {
@@ -890,7 +891,7 @@ func (cc *cacheContext) lazyChecksum(ctx context.Context, m *mount, p string) (*
 	return cr, err
 }
 
-func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *iradix.Txn, m *mount, k []byte, follow bool) (*CacheRecord, bool, error) {
+func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *iradix.Txn, m *mount, k []byte, follow bool) (*cachecontenthash.CacheRecord, bool, error) {
 	origk := k
 	k, cr, err := getFollowLinks(root, k, follow)
 	if err != nil {
@@ -905,7 +906,7 @@ func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *ir
 	var dgst digest.Digest
 
 	switch cr.Type {
-	case CacheRecordTypeDir:
+	case cachecontenthash.CacheRecordTypeDir:
 		digester := depot.NewFastDigester()
 		next := append(k, 0)
 		iter := root.Iterator()
@@ -925,7 +926,7 @@ func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *ir
 
 			digester.Hash().Write([]byte(subcr.Digest))
 
-			if subcr.Type == CacheRecordTypeDir { // skip subfiles
+			if subcr.Type == cachecontenthash.CacheRecordTypeDir { // skip subfiles
 				next := append(subk, 0, 0xff)
 				iter = root.Iterator()
 				iter.SeekLowerBound(next)
@@ -956,7 +957,7 @@ func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *ir
 		}
 	}
 
-	cr2 := &CacheRecord{
+	cr2 := &cachecontenthash.CacheRecord{
 		Digest:   dgst,
 		Type:     cr.Type,
 		Linkname: cr.Linkname,
@@ -985,8 +986,8 @@ func (cc *cacheContext) needsScanFollow(root *iradix.Node, p string, linksWalked
 		}
 		return cc.needsScanFollow(root, path.Clean(path.Dir(p)), linksWalked)
 	}
-	cr := v.(*CacheRecord)
-	if cr.Type == CacheRecordTypeSymlink {
+	cr := v.(*cachecontenthash.CacheRecord)
+	if cr.Type == cachecontenthash.CacheRecordTypeSymlink {
 		if *linksWalked > 255 {
 			return false, errTooManyLinks
 		}
@@ -1013,8 +1014,8 @@ func (cc *cacheContext) scanPath(ctx context.Context, m *mount, p string) (retEr
 	txn := cc.tree.Txn()
 
 	parentPath, err := rootPath(mp, filepath.FromSlash(d), func(p, link string) error {
-		cr := &CacheRecord{
-			Type:     CacheRecordTypeSymlink,
+		cr := &cachecontenthash.CacheRecord{
+			Type:     cachecontenthash.CacheRecordTypeSymlink,
 			Linkname: filepath.ToSlash(link),
 		}
 		k := []byte(path.Join("/", filepath.ToSlash(p)))
@@ -1040,11 +1041,11 @@ func (cc *cacheContext) scanPath(ctx context.Context, m *mount, p string) (retEr
 		}
 		k = convertPathToKey(k)
 		if _, ok := n.Get(k); !ok {
-			cr := &CacheRecord{
-				Type: CacheRecordTypeFile,
+			cr := &cachecontenthash.CacheRecord{
+				Type: cachecontenthash.CacheRecordTypeFile,
 			}
 			if fi.Mode()&os.ModeSymlink != 0 {
-				cr.Type = CacheRecordTypeSymlink
+				cr.Type = cachecontenthash.CacheRecordTypeSymlink
 				link, err := os.Readlink(itemPath)
 				if err != nil {
 					return err
@@ -1052,9 +1053,9 @@ func (cc *cacheContext) scanPath(ctx context.Context, m *mount, p string) (retEr
 				cr.Linkname = filepath.ToSlash(link)
 			}
 			if fi.IsDir() {
-				cr.Type = CacheRecordTypeDirHeader
-				cr2 := &CacheRecord{
-					Type: CacheRecordTypeDir,
+				cr.Type = cachecontenthash.CacheRecordTypeDirHeader
+				cr2 := &cachecontenthash.CacheRecord{
+					Type: cachecontenthash.CacheRecordTypeDir,
 				}
 				txn.Insert(k, cr2)
 				k = append(k, 0)
@@ -1071,15 +1072,15 @@ func (cc *cacheContext) scanPath(ctx context.Context, m *mount, p string) (retEr
 	return nil
 }
 
-func getFollowLinks(root *iradix.Node, k []byte, follow bool) ([]byte, *CacheRecord, error) {
+func getFollowLinks(root *iradix.Node, k []byte, follow bool) ([]byte, *cachecontenthash.CacheRecord, error) {
 	var linksWalked int
 	return getFollowLinksWalk(root, k, follow, &linksWalked)
 }
 
-func getFollowLinksWalk(root *iradix.Node, k []byte, follow bool, linksWalked *int) ([]byte, *CacheRecord, error) {
+func getFollowLinksWalk(root *iradix.Node, k []byte, follow bool, linksWalked *int) ([]byte, *cachecontenthash.CacheRecord, error) {
 	v, ok := root.Get(k)
 	if ok {
-		return k, v.(*CacheRecord), nil
+		return k, v.(*cachecontenthash.CacheRecord), nil
 	}
 	if !follow || len(k) == 0 {
 		return k, nil, nil
@@ -1092,7 +1093,7 @@ func getFollowLinksWalk(root *iradix.Node, k []byte, follow bool, linksWalked *i
 		return nil, nil, err
 	}
 	if parent != nil {
-		if parent.Type == CacheRecordTypeSymlink {
+		if parent.Type == cachecontenthash.CacheRecordTypeSymlink {
 			*linksWalked++
 			if *linksWalked > 255 {
 				return nil, nil, errors.Errorf("too many links")
@@ -1105,7 +1106,7 @@ func getFollowLinksWalk(root *iradix.Node, k []byte, follow bool, linksWalked *i
 	k = append(k, file...)
 	v, ok = root.Get(k)
 	if ok {
-		return k, v.(*CacheRecord), nil
+		return k, v.(*cachecontenthash.CacheRecord), nil
 	}
 	return k, nil, nil
 }

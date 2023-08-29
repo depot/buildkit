@@ -17,7 +17,8 @@ import (
 	ctdmetadata "github.com/containerd/containerd/metadata"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/native"
-	cache "github.com/moby/buildkit/depot/cache"
+	"github.com/moby/buildkit/cache"
+	depotcache "github.com/moby/buildkit/depot/cache"
 	"github.com/moby/buildkit/depot/cache/metadata"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
@@ -1196,7 +1197,7 @@ func setupCacheManager(t *testing.T, tmpdir string, snapshotterName string, snap
 	applier := winlayers.NewFileSystemApplierWithWindows(c, apply.NewFileSystemApplier(c))
 	differ := winlayers.NewWalkingDiffWithWindows(c, walking.NewWalkingDiff(c))
 
-	cm, err := cache.NewManager(cache.ManagerOpt{
+	cm, err := depotcache.NewManager(depotcache.ManagerOpt{
 		Snapshotter:    snapshot.FromContainerdSnapshotter(snapshotterName, containerdsnapshot.NSSnapshotter("buildkit", mdb.Snapshotter(snapshotterName)), nil),
 		MetadataStore:  md,
 		LeaseManager:   lm,

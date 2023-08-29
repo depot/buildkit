@@ -12,8 +12,8 @@ import (
 
 	iradix "github.com/hashicorp/go-immutable-radix"
 	"github.com/hashicorp/golang-lru/simplelru"
+	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/depot"
-	cache "github.com/moby/buildkit/depot/cache"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/locker"

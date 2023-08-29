@@ -19,6 +19,8 @@ import (
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
+	depotcache "github.com/moby/buildkit/depot/cache"
+	depotmetadata "github.com/moby/buildkit/depot/cache/metadata"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/executor/resources"
 	"github.com/moby/buildkit/exporter"
@@ -101,19 +103,43 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 		ContentStore: opt.ContentStore,
 	})
 
-	cm, err := cache.NewManager(cache.ManagerOpt{
-		Snapshotter:     opt.Snapshotter,
-		PruneRefChecker: imageRefChecker,
-		Applier:         opt.Applier,
-		GarbageCollect:  opt.GarbageCollect,
-		LeaseManager:    opt.LeaseManager,
-		ContentStore:    opt.ContentStore,
-		Differ:          opt.Differ,
-		MetadataStore:   opt.MetadataStore,
-		MountPoolRoot:   opt.MountPoolRoot,
-	})
-	if err != nil {
-		return nil, err
+	var (
+		cm  cache.Manager
+		err error
+	)
+
+	if os.Getenv("DEPOT_MANAGER") != "" {
+		bklog.G(ctx).Infof("using depot cache manager")
+		metadataStore := depotmetadata.FromCacheMetadataStore(opt.MetadataStore)
+		cm, err = depotcache.NewManager(depotcache.ManagerOpt{
+			Snapshotter:     opt.Snapshotter,
+			PruneRefChecker: imageRefChecker,
+			Applier:         opt.Applier,
+			GarbageCollect:  opt.GarbageCollect,
+			LeaseManager:    opt.LeaseManager,
+			ContentStore:    opt.ContentStore,
+			Differ:          opt.Differ,
+			MetadataStore:   metadataStore,
+			MountPoolRoot:   opt.MountPoolRoot,
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		cm, err = cache.NewManager(cache.ManagerOpt{
+			Snapshotter:     opt.Snapshotter,
+			PruneRefChecker: imageRefChecker,
+			Applier:         opt.Applier,
+			GarbageCollect:  opt.GarbageCollect,
+			LeaseManager:    opt.LeaseManager,
+			ContentStore:    opt.ContentStore,
+			Differ:          opt.Differ,
+			MetadataStore:   opt.MetadataStore,
+			MountPoolRoot:   opt.MountPoolRoot,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	sm, err := source.NewManager()

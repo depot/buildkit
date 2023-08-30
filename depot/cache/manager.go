@@ -79,10 +79,6 @@ func NewManager(opt ManagerOpt) (cache.Manager, error) {
 		records:         make(map[string]*cacheRecord),
 	}
 
-	if err := cm.init(context.TODO()); err != nil {
-		return nil, err
-	}
-
 	p, err := newSharableMountPool(opt.MountPoolRoot)
 	if err != nil {
 		return nil, err
@@ -276,24 +272,6 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 	}
 
 	return ref, nil
-}
-
-// init loads all snapshots from metadata state and tries to load the records
-// from the snapshotter. If snaphot can't be found, metadata is deleted as well.
-func (cm *cacheManager) init(ctx context.Context) error {
-	items, err := cm.MetadataStore.IDs()
-	if err != nil {
-		return err
-	}
-
-	for _, si := range items {
-		if _, err := cm.getRecord(ctx, si); err != nil {
-			bklog.G(ctx).Debugf("could not load snapshot %s: %+v", si, err)
-			cm.MetadataStore.Clear(si)
-			cm.LeaseManager.Delete(ctx, leases.Lease{ID: si})
-		}
-	}
-	return nil
 }
 
 // IdentityMapping returns the userns remapping used for refs

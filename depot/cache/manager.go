@@ -281,16 +281,16 @@ func (cm *cacheManager) GetByBlob(ctx context.Context, desc ocispecs.Descriptor,
 // init loads all snapshots from metadata state and tries to load the records
 // from the snapshotter. If snaphot can't be found, metadata is deleted as well.
 func (cm *cacheManager) init(ctx context.Context) error {
-	items, err := cm.MetadataStore.All()
+	items, err := cm.MetadataStore.IDs()
 	if err != nil {
 		return err
 	}
 
 	for _, si := range items {
-		if _, err := cm.getRecord(ctx, si.ID()); err != nil {
-			bklog.G(ctx).Debugf("could not load snapshot %s: %+v", si.ID(), err)
-			cm.MetadataStore.Clear(si.ID())
-			cm.LeaseManager.Delete(ctx, leases.Lease{ID: si.ID()})
+		if _, err := cm.getRecord(ctx, si); err != nil {
+			bklog.G(ctx).Debugf("could not load snapshot %s: %+v", si, err)
+			cm.MetadataStore.Clear(si)
+			cm.LeaseManager.Delete(ctx, leases.Lease{ID: si})
 		}
 	}
 	return nil

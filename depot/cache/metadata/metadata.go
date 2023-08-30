@@ -41,23 +41,15 @@ func (s *Store) DB() *bolt.DB {
 	return s.db
 }
 
-func (s *Store) All() ([]*StorageItem, error) {
-	var out []*StorageItem
+func (s *Store) IDs() ([]string, error) {
+	var out []string
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(mainBucket))
 		if b == nil {
 			return nil
 		}
 		return b.ForEach(func(key, _ []byte) error {
-			b := b.Bucket(key)
-			if b == nil {
-				return nil
-			}
-			si, err := newStorageItem(string(key), b, s)
-			if err != nil {
-				return err
-			}
-			out = append(out, si)
+			out = append(out, string(key))
 			return nil
 		})
 	})

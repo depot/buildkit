@@ -77,14 +77,16 @@ func TestGetSetSearch(t *testing.T) {
 	err = si.Commit()
 	require.NoError(t, err)
 
-	sis, err := s.All()
+	sis, err := s.IDs()
 	require.NoError(t, err)
 	require.Equal(t, 2, len(sis))
 
-	require.Equal(t, "foo", sis[0].ID())
-	require.Equal(t, "foo2", sis[1].ID())
+	require.Equal(t, "foo", sis[0])
+	require.Equal(t, "foo2", sis[1])
+	foo, ok := s.Get(sis[0])
+	require.True(t, ok)
 
-	v = sis[0].Get("bar")
+	v = foo.Get("bar")
 	require.NotNil(t, v)
 
 	str = ""
@@ -93,14 +95,14 @@ func TestGetSetSearch(t *testing.T) {
 	require.Equal(t, "foobar", str)
 
 	// clear foo, check that only foo2 exists
-	err = s.Clear(sis[0].ID())
+	err = s.Clear(sis[0])
 	require.NoError(t, err)
 
-	sis, err = s.All()
+	sis, err = s.IDs()
 	require.NoError(t, err)
 	require.Equal(t, 1, len(sis))
 
-	require.Equal(t, "foo2", sis[0].ID())
+	require.Equal(t, "foo2", sis[0])
 
 	_, ok = s.Get("foo")
 	require.False(t, ok)

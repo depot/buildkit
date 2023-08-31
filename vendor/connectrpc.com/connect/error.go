@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	commonErrorsURL          = "https://connect.build/docs/go/common-errors"
+	commonErrorsURL          = "https://connectrpc.com/docs/go/common-errors"
 	defaultAnyResolverPrefix = "type.googleapis.com/"
 )
 
@@ -112,7 +112,7 @@ func (d *ErrorDetail) Value() (proto.Message, error) {
 // They're a clearer and more performant alternative to HTTP header
 // microformats. See [the documentation on errors] for more details.
 //
-// [the documentation on errors]: https://connect.build/docs/go/errors
+// [the documentation on errors]: https://connectrpc.com/docs/go/errors
 type Error struct {
 	code    Code
 	err     error

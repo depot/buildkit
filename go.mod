@@ -3,6 +3,7 @@ module github.com/moby/buildkit
 go 1.20
 
 require (
+	connectrpc.com/connect v1.11.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.1.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v0.4.1
 	github.com/Masterminds/semver/v3 v3.1.0
@@ -15,7 +16,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.11.56
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.30.6
 	github.com/aws/smithy-go v1.13.5
-	github.com/bufbuild/connect-go v1.10.0
 	github.com/containerd/console v1.0.3
 	github.com/containerd/containerd v1.7.2
 	github.com/containerd/continuity v0.4.1

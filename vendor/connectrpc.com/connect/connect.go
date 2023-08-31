@@ -20,8 +20,8 @@
 // isolation. Walkthroughs, FAQs, and other narrative docs are available on the
 // [Connect website], and there's a working [demonstration service] on Github.
 //
-// [Connect website]: https://connect.build
-// [demonstration service]: https://github.com/bufbuild/connect-demo
+// [Connect website]: https://connectrpc.com
+// [demonstration service]: https://github.com/connectrpc/examples-go
 package connect
 
 import (
@@ -33,7 +33,7 @@ import (
 )
 
 // Version is the semantic version of the connect module.
-const Version = "1.10.0"
+const Version = "1.11.1"
 
 // These constants are used in compile-time handshakes with connect's generated
 // code.

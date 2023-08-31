@@ -5,9 +5,9 @@
 package cloudv3connect
 
 import (
+	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	connect_go "github.com/bufbuild/connect-go"
 	api "github.com/moby/buildkit/depot/api"
 	http "net/http"
 	strings "strings"
@@ -18,7 +18,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect_go.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion0_1_0
 
 const (
 	// MachineServiceName is the fully-qualified name of the MachineService service.
@@ -48,10 +48,10 @@ const (
 
 // MachineServiceClient is a client for the depot.cloud.v3.MachineService service.
 type MachineServiceClient interface {
-	RegisterMachine(context.Context, *connect_go.Request[api.RegisterMachineRequest]) (*connect_go.ServerStreamForClient[api.RegisterMachineResponse], error)
-	PingMachineHealth(context.Context, *connect_go.Request[api.PingMachineHealthRequest]) (*connect_go.Response[api.PingMachineHealthResponse], error)
-	Usage(context.Context, *connect_go.Request[api.UsageRequest]) (*connect_go.Response[api.UsageResponse], error)
-	ReportStatus(context.Context) *connect_go.ClientStreamForClient[api.ReportStatusRequest, api.ReportStatusResponse]
+	RegisterMachine(context.Context, *connect.Request[api.RegisterMachineRequest]) (*connect.ServerStreamForClient[api.RegisterMachineResponse], error)
+	PingMachineHealth(context.Context, *connect.Request[api.PingMachineHealthRequest]) (*connect.Response[api.PingMachineHealthResponse], error)
+	Usage(context.Context, *connect.Request[api.UsageRequest]) (*connect.Response[api.UsageResponse], error)
+	ReportStatus(context.Context) *connect.ClientStreamForClient[api.ReportStatusRequest, api.ReportStatusResponse]
 }
 
 // NewMachineServiceClient constructs a client for the depot.cloud.v3.MachineService service. By
@@ -61,25 +61,25 @@ type MachineServiceClient interface {
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewMachineServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) MachineServiceClient {
+func NewMachineServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) MachineServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &machineServiceClient{
-		registerMachine: connect_go.NewClient[api.RegisterMachineRequest, api.RegisterMachineResponse](
+		registerMachine: connect.NewClient[api.RegisterMachineRequest, api.RegisterMachineResponse](
 			httpClient,
 			baseURL+MachineServiceRegisterMachineProcedure,
 			opts...,
 		),
-		pingMachineHealth: connect_go.NewClient[api.PingMachineHealthRequest, api.PingMachineHealthResponse](
+		pingMachineHealth: connect.NewClient[api.PingMachineHealthRequest, api.PingMachineHealthResponse](
 			httpClient,
 			baseURL+MachineServicePingMachineHealthProcedure,
 			opts...,
 		),
-		usage: connect_go.NewClient[api.UsageRequest, api.UsageResponse](
+		usage: connect.NewClient[api.UsageRequest, api.UsageResponse](
 			httpClient,
 			baseURL+MachineServiceUsageProcedure,
 			opts...,
 		),
-		reportStatus: connect_go.NewClient[api.ReportStatusRequest, api.ReportStatusResponse](
+		reportStatus: connect.NewClient[api.ReportStatusRequest, api.ReportStatusResponse](
 			httpClient,
 			baseURL+MachineServiceReportStatusProcedure,
 			opts...,
@@ -89,38 +89,38 @@ func NewMachineServiceClient(httpClient connect_go.HTTPClient, baseURL string, o
 
 // machineServiceClient implements MachineServiceClient.
 type machineServiceClient struct {
-	registerMachine   *connect_go.Client[api.RegisterMachineRequest, api.RegisterMachineResponse]
-	pingMachineHealth *connect_go.Client[api.PingMachineHealthRequest, api.PingMachineHealthResponse]
-	usage             *connect_go.Client[api.UsageRequest, api.UsageResponse]
-	reportStatus      *connect_go.Client[api.ReportStatusRequest, api.ReportStatusResponse]
+	registerMachine   *connect.Client[api.RegisterMachineRequest, api.RegisterMachineResponse]
+	pingMachineHealth *connect.Client[api.PingMachineHealthRequest, api.PingMachineHealthResponse]
+	usage             *connect.Client[api.UsageRequest, api.UsageResponse]
+	reportStatus      *connect.Client[api.ReportStatusRequest, api.ReportStatusResponse]
 }
 
 // RegisterMachine calls depot.cloud.v3.MachineService.RegisterMachine.
-func (c *machineServiceClient) RegisterMachine(ctx context.Context, req *connect_go.Request[api.RegisterMachineRequest]) (*connect_go.ServerStreamForClient[api.RegisterMachineResponse], error) {
+func (c *machineServiceClient) RegisterMachine(ctx context.Context, req *connect.Request[api.RegisterMachineRequest]) (*connect.ServerStreamForClient[api.RegisterMachineResponse], error) {
 	return c.registerMachine.CallServerStream(ctx, req)
 }
 
 // PingMachineHealth calls depot.cloud.v3.MachineService.PingMachineHealth.
-func (c *machineServiceClient) PingMachineHealth(ctx context.Context, req *connect_go.Request[api.PingMachineHealthRequest]) (*connect_go.Response[api.PingMachineHealthResponse], error) {
+func (c *machineServiceClient) PingMachineHealth(ctx context.Context, req *connect.Request[api.PingMachineHealthRequest]) (*connect.Response[api.PingMachineHealthResponse], error) {
 	return c.pingMachineHealth.CallUnary(ctx, req)
 }
 
 // Usage calls depot.cloud.v3.MachineService.Usage.
-func (c *machineServiceClient) Usage(ctx context.Context, req *connect_go.Request[api.UsageRequest]) (*connect_go.Response[api.UsageResponse], error) {
+func (c *machineServiceClient) Usage(ctx context.Context, req *connect.Request[api.UsageRequest]) (*connect.Response[api.UsageResponse], error) {
 	return c.usage.CallUnary(ctx, req)
 }
 
 // ReportStatus calls depot.cloud.v3.MachineService.ReportStatus.
-func (c *machineServiceClient) ReportStatus(ctx context.Context) *connect_go.ClientStreamForClient[api.ReportStatusRequest, api.ReportStatusResponse] {
+func (c *machineServiceClient) ReportStatus(ctx context.Context) *connect.ClientStreamForClient[api.ReportStatusRequest, api.ReportStatusResponse] {
 	return c.reportStatus.CallClientStream(ctx)
 }
 
 // MachineServiceHandler is an implementation of the depot.cloud.v3.MachineService service.
 type MachineServiceHandler interface {
-	RegisterMachine(context.Context, *connect_go.Request[api.RegisterMachineRequest], *connect_go.ServerStream[api.RegisterMachineResponse]) error
-	PingMachineHealth(context.Context, *connect_go.Request[api.PingMachineHealthRequest]) (*connect_go.Response[api.PingMachineHealthResponse], error)
-	Usage(context.Context, *connect_go.Request[api.UsageRequest]) (*connect_go.Response[api.UsageResponse], error)
-	ReportStatus(context.Context, *connect_go.ClientStream[api.ReportStatusRequest]) (*connect_go.Response[api.ReportStatusResponse], error)
+	RegisterMachine(context.Context, *connect.Request[api.RegisterMachineRequest], *connect.ServerStream[api.RegisterMachineResponse]) error
+	PingMachineHealth(context.Context, *connect.Request[api.PingMachineHealthRequest]) (*connect.Response[api.PingMachineHealthResponse], error)
+	Usage(context.Context, *connect.Request[api.UsageRequest]) (*connect.Response[api.UsageResponse], error)
+	ReportStatus(context.Context, *connect.ClientStream[api.ReportStatusRequest]) (*connect.Response[api.ReportStatusResponse], error)
 }
 
 // NewMachineServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -128,46 +128,58 @@ type MachineServiceHandler interface {
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewMachineServiceHandler(svc MachineServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	mux := http.NewServeMux()
-	mux.Handle(MachineServiceRegisterMachineProcedure, connect_go.NewServerStreamHandler(
+func NewMachineServiceHandler(svc MachineServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	machineServiceRegisterMachineHandler := connect.NewServerStreamHandler(
 		MachineServiceRegisterMachineProcedure,
 		svc.RegisterMachine,
 		opts...,
-	))
-	mux.Handle(MachineServicePingMachineHealthProcedure, connect_go.NewUnaryHandler(
+	)
+	machineServicePingMachineHealthHandler := connect.NewUnaryHandler(
 		MachineServicePingMachineHealthProcedure,
 		svc.PingMachineHealth,
 		opts...,
-	))
-	mux.Handle(MachineServiceUsageProcedure, connect_go.NewUnaryHandler(
+	)
+	machineServiceUsageHandler := connect.NewUnaryHandler(
 		MachineServiceUsageProcedure,
 		svc.Usage,
 		opts...,
-	))
-	mux.Handle(MachineServiceReportStatusProcedure, connect_go.NewClientStreamHandler(
+	)
+	machineServiceReportStatusHandler := connect.NewClientStreamHandler(
 		MachineServiceReportStatusProcedure,
 		svc.ReportStatus,
 		opts...,
-	))
-	return "/depot.cloud.v3.MachineService/", mux
+	)
+	return "/depot.cloud.v3.MachineService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case MachineServiceRegisterMachineProcedure:
+			machineServiceRegisterMachineHandler.ServeHTTP(w, r)
+		case MachineServicePingMachineHealthProcedure:
+			machineServicePingMachineHealthHandler.ServeHTTP(w, r)
+		case MachineServiceUsageProcedure:
+			machineServiceUsageHandler.ServeHTTP(w, r)
+		case MachineServiceReportStatusProcedure:
+			machineServiceReportStatusHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // UnimplementedMachineServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedMachineServiceHandler struct{}
 
-func (UnimplementedMachineServiceHandler) RegisterMachine(context.Context, *connect_go.Request[api.RegisterMachineRequest], *connect_go.ServerStream[api.RegisterMachineResponse]) error {
-	return connect_go.NewError(connect_go.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.RegisterMachine is not implemented"))
+func (UnimplementedMachineServiceHandler) RegisterMachine(context.Context, *connect.Request[api.RegisterMachineRequest], *connect.ServerStream[api.RegisterMachineResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.RegisterMachine is not implemented"))
 }
 
-func (UnimplementedMachineServiceHandler) PingMachineHealth(context.Context, *connect_go.Request[api.PingMachineHealthRequest]) (*connect_go.Response[api.PingMachineHealthResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.PingMachineHealth is not implemented"))
+func (UnimplementedMachineServiceHandler) PingMachineHealth(context.Context, *connect.Request[api.PingMachineHealthRequest]) (*connect.Response[api.PingMachineHealthResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.PingMachineHealth is not implemented"))
 }
 
-func (UnimplementedMachineServiceHandler) Usage(context.Context, *connect_go.Request[api.UsageRequest]) (*connect_go.Response[api.UsageResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.Usage is not implemented"))
+func (UnimplementedMachineServiceHandler) Usage(context.Context, *connect.Request[api.UsageRequest]) (*connect.Response[api.UsageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.Usage is not implemented"))
 }
 
-func (UnimplementedMachineServiceHandler) ReportStatus(context.Context, *connect_go.ClientStream[api.ReportStatusRequest]) (*connect_go.Response[api.ReportStatusResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.ReportStatus is not implemented"))
+func (UnimplementedMachineServiceHandler) ReportStatus(context.Context, *connect.ClientStream[api.ReportStatusRequest]) (*connect.Response[api.ReportStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.ReportStatus is not implemented"))
 }

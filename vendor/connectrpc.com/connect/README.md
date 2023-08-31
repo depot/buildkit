@@ -1,9 +1,9 @@
 Connect
 =======
 
-[![Build](https://github.com/bufbuild/connect-go/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/bufbuild/connect-go/actions/workflows/ci.yaml)
-[![Report Card](https://goreportcard.com/badge/github.com/bufbuild/connect-go)](https://goreportcard.com/report/github.com/bufbuild/connect-go)
-[![GoDoc](https://pkg.go.dev/badge/github.com/bufbuild/connect-go.svg)](https://pkg.go.dev/github.com/bufbuild/connect-go)
+[![Build](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/connectrpc/connect-go/actions/workflows/ci.yaml)
+[![Report Card](https://goreportcard.com/badge/connectrpc.com/connect)](https://goreportcard.com/report/connectrpc.com/connect)
+[![GoDoc](https://pkg.go.dev/badge/connectrpc.com/connect.svg)](https://pkg.go.dev/connectrpc.com/connect)
 
 Connect is a slim library for building browser and gRPC-compatible HTTP APIs.
 You write a short [Protocol Buffer][protobuf] schema and implement your
@@ -22,19 +22,19 @@ using `curl`. Try it with our live demo:
 curl \
     --header "Content-Type: application/json" \
     --data '{"sentence": "I feel happy."}' \
-    https://demo.connect.build/buf.connect.demo.eliza.v1.ElizaService/Say
+    https://demo.connectrpc.com/connectrpc.eliza.v1.ElizaService/Say
 ```
 
 Handlers and clients also support the gRPC and gRPC-Web protocols, including
 streaming, headers, trailers, and error details. gRPC-compatible [server
-reflection][] and [health checks][] are available as standalone packages.
-Instead of cURL, we could call our API with `buf curl`:
+reflection][grpcreflect] and [health checks][grpchealth] are available as
+standalone packages. Instead of cURL, we could call our API with a gRPC client:
 
 ```
 go install github.com/bufbuild/buf/cmd/buf@latest
 buf curl --protocol grpc \
     --data '{"sentence": "I feel happy."}' \
-    https://demo.connect.build/buf.connect.demo.eliza.v1.ElizaService/Say
+    https://demo.connectrpc.com/connectrpc.eliza.v1.ElizaService/Say
 ```
 
 Under the hood, Connect is just [Protocol Buffers][protobuf] and the standard
@@ -44,8 +44,8 @@ still applies, and any package that works with an `http.Server`, `http.Client`,
 or `http.Handler` also works with Connect.
 
 For more on Connect, see the [announcement blog post][blog], the documentation
-on [connect.build][docs] (especially the [Getting Started] guide for Go), the
-[demo service][demo], or the [protocol specification][protocol].
+on [connectrpc.com][docs] (especially the [Getting Started] guide for Go), the
+[demo service][examples-go], or the [protocol specification][protocol].
 
 ## A small example
 
@@ -62,9 +62,9 @@ import (
   "log"
   "net/http"
 
-  "github.com/bufbuild/connect-go"
-  pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
-  "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
+  "connectrpc.com/connect"
+  pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+  "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
   "golang.org/x/net/http2"
   "golang.org/x/net/http2/h2c"
 )
@@ -105,7 +105,7 @@ func main() {
 ```
 
 With that server running, you can make requests with any gRPC or Connect
-client. To write a client using `connect-go`,
+client. To write a client using Connect,
 
 ```go
 package main
@@ -115,9 +115,9 @@ import (
   "log"
   "net/http"
 
-  "github.com/bufbuild/connect-go"
-  pingv1 "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1"
-  "github.com/bufbuild/connect-go/internal/gen/connect/ping/v1/pingv1connect"
+  "connectrpc.com/connect"
+  pingv1 "connectrpc.com/connect/internal/gen/connect/ping/v1"
+  "connectrpc.com/connect/internal/gen/connect/ping/v1/pingv1connect"
 )
 
 func main() {
@@ -144,9 +144,9 @@ configuring timeouts, connection pools, observability, and h2c.
 
 ## Ecosystem
 
-* [connect-grpchealth-go]: gRPC-compatible health checks
-* [connect-grpcreflect-go]: gRPC-compatible server reflection
-* [connect-demo]: service powering demo.connect.build, including bidi streaming
+* [grpchealth]: gRPC-compatible health checks
+* [grpcreflect]: gRPC-compatible server reflection
+* [examples-go]: service powering demo.connectrpc.com, including bidi streaming
 * [connect-web]: TypeScript clients for web browsers
 * [Buf Studio]: web UI for ad-hoc RPCs
 * [connect-crosstest]: gRPC and gRPC-Web interoperability tests
@@ -155,10 +155,11 @@ configuring timeouts, connection pools, observability, and h2c.
 
 This module is stable. It supports:
 
-* The [two most recent major releases][go-support-policy] of Go.
+* The three most recent major releases of Go. Keep in mind that [only the last
+  two releases receive security patches][go-support-policy].
 * [APIv2] of Protocol Buffers in Go (`google.golang.org/protobuf`).
 
-Within those parameters, `connect-go` follows semantic versioning. We will
+Within those parameters, `connect` follows semantic versioning. We will
 _not_ make breaking changes in the 1.x series of releases.
 
 ## Legal
@@ -167,19 +168,16 @@ Offered under the [Apache 2 license][license].
 
 [APIv2]: https://blog.golang.org/protobuf-apiv2
 [Buf Studio]: https://buf.build/studio
-[Getting Started]: https://connect.build/docs/go/getting-started
+[Getting Started]: https://connectrpc.com/docs/go/getting-started
 [blog]: https://buf.build/blog/connect-a-better-grpc
 [connect-crosstest]: https://github.com/bufbuild/connect-crosstest
-[connect-demo]: https://github.com/bufbuild/connect-demo
-[connect-grpchealth-go]: https://github.com/bufbuild/connect-grpchealth-go
-[connect-grpcreflect-go]: https://github.com/bufbuild/connect-grpcreflect-go
+[grpchealth]: https://github.com/connectrpc/grpchealth-go
+[grpcreflect]: https://github.com/connectrpc/grpcreflect-go
 [connect-web]: https://www.npmjs.com/package/@bufbuild/connect-web
-[demo]: https://github.com/bufbuild/connect-demo
-[docs-deployment]: https://connect.build/docs/go/deployment
-[docs]: https://connect.build
+[examples-go]: https://github.com/connectrpc/examples-go
+[docs-deployment]: https://connectrpc.com/docs/go/deployment
+[docs]: https://connectrpc.com
 [go-support-policy]: https://golang.org/doc/devel/release#policy
-[health checks]: https://github.com/bufbuild/connect-grpchealth-go
-[license]: https://github.com/bufbuild/connect-go/blob/main/LICENSE
+[license]: https://github.com/connectrpc/connect-go/blob/main/LICENSE
 [protobuf]: https://developers.google.com/protocol-buffers
-[protocol]: https://connect.build/docs/protocol
-[server reflection]: https://github.com/bufbuild/connect-grpcreflect-go
+[protocol]: https://connectrpc.com/docs/protocol

@@ -28,7 +28,7 @@ import (
 // See the [Connect protocol specification] for detailed descriptions of each
 // code and example usage.
 //
-// [Connect protocol specification]: https://connect.build/docs/protocol
+// [Connect protocol specification]: https://connectrpc.com/docs/protocol
 type Code uint32
 
 const (

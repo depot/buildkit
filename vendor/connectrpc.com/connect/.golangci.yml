@@ -6,11 +6,7 @@ linters-settings:
   exhaustruct:
     include:
       # No zero values for param structs.
-      - 'github\.com/bufbuild/connect-go\..*[pP]arams'
-      # No zero values for ClientStream, ServerStream, and friends.
-      - 'github\.com/bufbuild/connect-go\.ClientStream.*'
-      - 'github\.com/bufbuild/connect-go\.ServerStream.*'
-      - 'github\.com/bufbuild/connect-go\.BidiStream.*'
+      - 'connectrpc\.com/connect\..*[pP]arams'
   forbidigo:
     forbid:
       - '^fmt\.Print'
@@ -25,9 +21,9 @@ linters-settings:
   importas:
     no-unaliased: true
     alias:
-      - pkg: github.com/bufbuild/connect-go
+      - pkg: connectrpc.com/connect
         alias: connect
-      - pkg: github.com/bufbuild/connect-go/internal/gen/connect/ping/v1
+      - pkg: connectrpc.com/connect/internal/gen/connect/ping/v1
         alias: pingv1
   varnamelen:
     ignore-decls:
@@ -38,6 +34,7 @@ linters:
   enable-all: true
   disable:
     - cyclop            # covered by gocyclo
+    - depguard          # unnecessary for small libraries
     - deadcode          # abandoned
     - exhaustivestruct  # replaced by exhaustruct
     - funlen            # rely on code review to limit function length

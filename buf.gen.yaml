@@ -9,9 +9,9 @@ managed:
       - buf.build/depot/buildkit
 
 plugins:
-  - plugin: buf.build/protocolbuffers/go:v1.30.0
+  - plugin: buf.build/protocolbuffers/go:v1.31.0
     out: depot/api
     opt: paths=source_relative
-  - plugin: buf.build/bufbuild/connect-go:v1.7.0
+  - plugin: buf.build/connectrpc/go:v1.11.1
     out: depot/api
     opt: paths=source_relative

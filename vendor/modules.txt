@@ -1,3 +1,7 @@
+# connectrpc.com/connect v1.11.1
+## explicit; go 1.19
+connectrpc.com/connect
+connectrpc.com/connect/internal/gen/connectext/grpc/status/v1
 # github.com/AdaLogics/go-fuzz-headers v0.0.0-20230106234847-43070de90fa1
 ## explicit; go 1.18
 github.com/AdaLogics/go-fuzz-headers
@@ -232,10 +236,6 @@ github.com/aws/smithy-go/waiter
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
-# github.com/bufbuild/connect-go v1.10.0
-## explicit; go 1.19
-github.com/bufbuild/connect-go
-github.com/bufbuild/connect-go/internal/gen/connectext/grpc/status/v1
 # github.com/cenkalti/backoff/v4 v4.2.0
 ## explicit; go 1.18
 github.com/cenkalti/backoff/v4

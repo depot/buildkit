@@ -15,13 +15,15 @@ type UsageInfo struct {
 	InUse   bool   `json:"inUse"`
 	Size    int64  `json:"size"`
 
-	CreatedAt   time.Time       `json:"createdAt"`
-	LastUsedAt  *time.Time      `json:"lastUsedAt"`
-	UsageCount  int             `json:"usageCount"`
-	Parents     []string        `json:"parents"`
-	Description string          `json:"description"`
-	RecordType  UsageRecordType `json:"recordType"`
-	Shared      bool            `json:"shared"`
+	CreatedAt     time.Time       `json:"createdAt"`
+	LastUsedAt    *time.Time      `json:"lastUsedAt"`
+	UsageCount    int             `json:"usageCount"`
+	Parents       []string        `json:"parents"`
+	Description   string          `json:"description"`
+	RecordType    UsageRecordType `json:"recordType"`
+	Shared        bool            `json:"shared"`
+	StableDigests []string        `json:"stableDigests"`
+	CreatorDigest string          `json:"creatorDigest"`
 }
 
 func (c *Client) DiskUsage(ctx context.Context, opts ...DiskUsageOption) ([]*UsageInfo, error) {
@@ -40,17 +42,19 @@ func (c *Client) DiskUsage(ctx context.Context, opts ...DiskUsageOption) ([]*Usa
 
 	for _, d := range resp.Record {
 		du = append(du, &UsageInfo{
-			ID:          d.ID,
-			Mutable:     d.Mutable,
-			InUse:       d.InUse,
-			Size:        d.Size_,
-			Parents:     d.Parents,
-			CreatedAt:   d.CreatedAt,
-			Description: d.Description,
-			UsageCount:  int(d.UsageCount),
-			LastUsedAt:  d.LastUsedAt,
-			RecordType:  UsageRecordType(d.RecordType),
-			Shared:      d.Shared,
+			ID:            d.ID,
+			Mutable:       d.Mutable,
+			InUse:         d.InUse,
+			Size:          d.Size_,
+			Parents:       d.Parents,
+			CreatedAt:     d.CreatedAt,
+			Description:   d.Description,
+			UsageCount:    int(d.UsageCount),
+			LastUsedAt:    d.LastUsedAt,
+			RecordType:    UsageRecordType(d.RecordType),
+			Shared:        d.Shared,
+			StableDigests: d.StableDigests,
+			CreatorDigest: d.CreatorDigest,
 		})
 	}
 

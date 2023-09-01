@@ -1294,18 +1294,20 @@ func (cm *cacheManager) markShared(m map[string]*cacheUsageInfo) error {
 }
 
 type cacheUsageInfo struct {
-	refs        int
-	parents     []string
-	size        int64
-	mutable     bool
-	createdAt   time.Time
-	usageCount  int
-	lastUsedAt  *time.Time
-	description string
-	doubleRef   bool
-	recordType  client.UsageRecordType
-	shared      bool
-	parentChain []digest.Digest
+	refs          int
+	parents       []string
+	size          int64
+	mutable       bool
+	createdAt     time.Time
+	usageCount    int
+	lastUsedAt    *time.Time
+	description   string
+	doubleRef     bool
+	recordType    client.UsageRecordType
+	shared        bool
+	parentChain   []digest.Digest
+	stableDigests []string
+	creatorDigest string
 }
 
 func (cm *cacheManager) DiskUsage(ctx context.Context, opt client.DiskUsageInfo) ([]*client.UsageInfo, error) {
@@ -1329,16 +1331,18 @@ func (cm *cacheManager) DiskUsage(ctx context.Context, opt client.DiskUsageInfo)
 
 		usageCount, lastUsedAt := cr.getLastUsed()
 		c := &cacheUsageInfo{
-			refs:        len(cr.refs),
-			mutable:     cr.mutable,
-			size:        cr.getSize(),
-			createdAt:   cr.GetCreatedAt(),
-			usageCount:  usageCount,
-			lastUsedAt:  lastUsedAt,
-			description: cr.GetDescription(),
-			doubleRef:   cr.equalImmutable != nil,
-			recordType:  cr.GetRecordType(),
-			parentChain: cr.layerDigestChain(),
+			refs:          len(cr.refs),
+			mutable:       cr.mutable,
+			size:          cr.getSize(),
+			createdAt:     cr.GetCreatedAt(),
+			usageCount:    usageCount,
+			lastUsedAt:    lastUsedAt,
+			description:   cr.GetDescription(),
+			doubleRef:     cr.equalImmutable != nil,
+			recordType:    cr.GetRecordType(),
+			parentChain:   cr.layerDigestChain(),
+			stableDigests: cr.GetStringSlice("depot.stableDigests"),
+			creatorDigest: cr.GetString("depot.vertexDigest"),
 		}
 		if c.recordType == "" {
 			c.recordType = client.UsageRecordTypeRegular
@@ -1395,17 +1399,19 @@ func (cm *cacheManager) DiskUsage(ctx context.Context, opt client.DiskUsageInfo)
 	var du []*client.UsageInfo
 	for id, cr := range m {
 		c := &client.UsageInfo{
-			ID:          id,
-			Mutable:     cr.mutable,
-			InUse:       cr.refs > 0,
-			Size:        cr.size,
-			Parents:     cr.parents,
-			CreatedAt:   cr.createdAt,
-			Description: cr.description,
-			LastUsedAt:  cr.lastUsedAt,
-			UsageCount:  cr.usageCount,
-			RecordType:  cr.recordType,
-			Shared:      cr.shared,
+			ID:            id,
+			Mutable:       cr.mutable,
+			InUse:         cr.refs > 0,
+			Size:          cr.size,
+			Parents:       cr.parents,
+			CreatedAt:     cr.createdAt,
+			Description:   cr.description,
+			LastUsedAt:    cr.lastUsedAt,
+			UsageCount:    cr.usageCount,
+			RecordType:    cr.recordType,
+			Shared:        cr.shared,
+			StableDigests: cr.stableDigests,
+			CreatorDigest: cr.creatorDigest,
 		}
 		if filter.Match(adaptUsageInfo(c)) {
 			du = append(du, c)
@@ -1472,6 +1478,18 @@ func CachePolicyDefault(m *cacheMetadata) error {
 func WithDescription(descr string) RefOption {
 	return func(m *cacheMetadata) error {
 		return m.queueDescription(descr)
+	}
+}
+
+func WithStableDigests(digests []string) RefOption {
+	return func(m *cacheMetadata) error {
+		return m.AppendStringSlice("depot.stableDigests", digests...)
+	}
+}
+
+func WithVertexDigest(digest string) RefOption {
+	return func(m *cacheMetadata) error {
+		return m.InsertIfNotExists("depot.vertexDigest", digest)
 	}
 }
 

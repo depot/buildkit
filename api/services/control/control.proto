@@ -35,7 +35,7 @@ message PruneRequest {
 }
 
 message DiskUsageRequest {
-	repeated string filter = 1; 
+	repeated string filter = 1;
 }
 
 message DiskUsageResponse {
@@ -55,6 +55,8 @@ message UsageRecord {
 	string RecordType = 10;
 	bool Shared = 11;
 	repeated string Parents = 12;
+	repeated string stable_digests = 9998;
+	string creator_digest = 9999;
 }
 
 message SolveRequest {

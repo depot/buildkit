@@ -176,17 +176,19 @@ func (c *Controller) DiskUsage(ctx context.Context, r *controlapi.DiskUsageReque
 		for _, r := range du {
 			resp.Record = append(resp.Record, &controlapi.UsageRecord{
 				// TODO: add worker info
-				ID:          r.ID,
-				Mutable:     r.Mutable,
-				InUse:       r.InUse,
-				Size_:       r.Size,
-				Parents:     r.Parents,
-				UsageCount:  int64(r.UsageCount),
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				ID:            r.ID,
+				Mutable:       r.Mutable,
+				InUse:         r.InUse,
+				Size_:         r.Size,
+				Parents:       r.Parents,
+				UsageCount:    int64(r.UsageCount),
+				Description:   r.Description,
+				CreatedAt:     r.CreatedAt,
+				LastUsedAt:    r.LastUsedAt,
+				RecordType:    string(r.RecordType),
+				Shared:        r.Shared,
+				StableDigests: r.StableDigests,
+				CreatorDigest: r.CreatorDigest,
 			})
 		}
 	}
@@ -249,17 +251,19 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 			didPrune = true
 			if err := stream.Send(&controlapi.UsageRecord{
 				// TODO: add worker info
-				ID:          r.ID,
-				Mutable:     r.Mutable,
-				InUse:       r.InUse,
-				Size_:       r.Size,
-				Parents:     r.Parents,
-				UsageCount:  int64(r.UsageCount),
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				ID:            r.ID,
+				Mutable:       r.Mutable,
+				InUse:         r.InUse,
+				Size_:         r.Size,
+				Parents:       r.Parents,
+				UsageCount:    int64(r.UsageCount),
+				Description:   r.Description,
+				CreatedAt:     r.CreatedAt,
+				LastUsedAt:    r.LastUsedAt,
+				RecordType:    string(r.RecordType),
+				Shared:        r.Shared,
+				StableDigests: r.StableDigests,
+				CreatorDigest: r.CreatorDigest,
 			}); err != nil {
 				return err
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/worker"
 	"github.com/pkg/errors"
 
@@ -110,7 +111,10 @@ func (d *diffOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 	}
 
 	diffRef, err := d.worker.CacheManager().Diff(ctx, lowerRef, upperRef, solver.ProgressControllerFromContext(ctx),
-		cache.WithDescription(d.vtx.Name()))
+		cache.WithDescription(d.vtx.Name()),
+		cache.WithStableDigests(depot.StableDigests(ctx)),
+		cache.WithVertexDigest(depot.VertexDigest(ctx)),
+	)
 	if err != nil {
 		return nil, err
 	}

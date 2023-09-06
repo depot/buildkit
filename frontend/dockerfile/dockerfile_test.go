@@ -3,7 +3,6 @@ package dockerfile
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,6 +20,8 @@ import (
 	"time"
 
 	v1 "github.com/moby/buildkit/cache/remotecache/v1"
+	// DEPOT: Using parallel gzip for faster image layer compression
+	gzip "github.com/klauspost/pgzip"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"
@@ -950,7 +951,7 @@ func testWorkdirCopyIgnoreRelative(t *testing.T, sb integration.Sandbox) {
 	dockerfile := []byte(`
 FROM scratch AS base
 WORKDIR /foo
-COPY Dockerfile / 
+COPY Dockerfile /
 FROM scratch
 # relative path still loaded as absolute
 COPY --from=base Dockerfile .
@@ -3897,7 +3898,7 @@ ONBUILD RUN mkdir -p /out && echo -n 11 >> /out/foo
 	require.NoError(t, err)
 
 	dockerfile = []byte(fmt.Sprintf(`
-	FROM %s 
+	FROM %s
 	`, target))
 
 	dir, err = integration.Tmpdir(
@@ -6694,7 +6695,8 @@ FROM scratch
 COPY --from=0 / /
 `)
 
-	const expectedDigest = "sha256:d286483eccf4d57c313a3f389cdc196e668d914d319c574b15aabdf1963c5eeb"
+	// DEPOT: updated digest to account for parallel gzip
+	const expectedDigest = "sha256:acdf86c3b7709d6890a2bd2e65ab289e099d797d6c874915362e9218531e5d49"
 
 	dir, err := integration.Tmpdir(
 		t,

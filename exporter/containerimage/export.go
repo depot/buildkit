@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
@@ -19,10 +20,13 @@ import (
 	"github.com/containerd/containerd/rootfs"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
+	"github.com/moby/buildkit/solver/result"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/contentutil"
 	"github.com/moby/buildkit/util/leaseutil"
@@ -36,6 +40,8 @@ import (
 )
 
 const (
+	DepotExportLease = "depot.export.lease"
+
 	// keyUnsafeInternalStoreAllowIncomplete should only be used for tests. This option allows exporting image to the image store
 	// as well as lacking some blobs in the content store. Some integration tests for lazyref behaviour depends on this option.
 	// Ignored when store=false.
@@ -154,6 +160,8 @@ func (e *imageExporter) Resolve(ctx context.Context, opt map[string]string) (exp
 				return nil, errors.Wrapf(err, "non-bool value specified for %s", k)
 			}
 			i.nameCanonical = b
+		case DepotExportLease:
+			i.UseExportLease = true
 		default:
 			if i.meta == nil {
 				i.meta = make(map[string][]byte)
@@ -176,6 +184,7 @@ type imageExporterInstance struct {
 	nameCanonical        bool
 	danglingPrefix       string
 	meta                 map[string][]byte
+	UseExportLease       bool
 }
 
 func (e *imageExporterInstance) Name() string {
@@ -185,6 +194,9 @@ func (e *imageExporterInstance) Name() string {
 func (e *imageExporterInstance) Config() *exporter.Config {
 	return exporter.NewConfigWithCompression(e.opts.RefCfg.Compression)
 }
+
+// DEPOT: We have a special lease attached to context to inhibit the GC of layers.
+type DepotLeaseKey struct{}
 
 func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, sessionID string) (_ map[string]string, descref exporter.DescriptorReference, err error) {
 	if src.Metadata == nil {
@@ -201,6 +213,27 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	}
 	opts.Annotations = opts.Annotations.Merge(as)
 
+	resp := make(map[string]string)
+
+	// DEPOT: Create the lease that should live long enough for the image load to complete.
+	if e.UseExportLease {
+		lease, err := e.opt.LeaseManager.Create(
+			ctx,
+			leases.WithRandomID(),
+			leases.WithExpiration(time.Hour),
+			leases.WithLabels(map[string]string{
+				depot.ExportLeaseLabel: sessionID,
+			}),
+		)
+		if err != nil {
+			bklog.G(ctx).Warnf("Unable to create lease for image export %v", err)
+		} else {
+			ctx = context.WithValue(ctx, DepotLeaseKey{}, lease.ID)
+			// DEPOT: The CLI uses this to delete the lease once the image is loaded.
+			resp[depot.ExportLeaseLabel] = lease.ID
+		}
+	}
+
 	ctx, done, err := leaseutil.WithLease(ctx, e.opt.LeaseManager, leaseutil.MakeTemporary)
 	if err != nil {
 		return nil, nil, err
@@ -211,7 +244,7 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		}
 	}()
 
-	desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
+	committed, desc, err := e.opt.ImageWriter.Commit(ctx, src, sessionID, &opts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -220,8 +253,6 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			descref = NewDescriptorReference(*desc, done)
 		}
 	}()
-
-	resp := make(map[string]string)
 
 	if n, ok := src.Metadata["image.name"]; e.opts.ImageName == "*" && ok {
 		e.opts.ImageName = string(n)
@@ -233,88 +264,124 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		nameCanonical = false
 	}
 
+	// DEPOT: Push struct is just my style to use two loops rather than just
+	// one mega long loop.  Just easier for my brain to read.
+	type Push struct {
+		src        *result.Result[cache.ImmutableRef]
+		sessionID  string
+		targetName string
+		dgst       digest.Digest
+	}
+	toPush := []Push{}
+
 	if e.opts.ImageName != "" {
 		targetNames := strings.Split(e.opts.ImageName, ",")
 		for _, targetName := range targetNames {
-			if e.opt.Images != nil && e.store {
-				tagDone := progress.OneOff(ctx, "naming to "+targetName)
+			if e.store {
+				if e.opt.Images != nil {
+					tagDone := progress.OneOff(ctx, "naming to "+targetName)
 
-				// imageClientCtx is used for propagating the epoch to e.opt.Images.Update() and e.opt.Images.Create().
-				//
-				// Ideally, we should be able to propagate the epoch via images.Image.CreatedAt.
-				// However, due to a bug of containerd, we are temporarily stuck with this workaround.
-				// https://github.com/containerd/containerd/issues/8322
-				imageClientCtx := ctx
-				if e.opts.Epoch != nil {
-					imageClientCtx = epoch.WithSourceDateEpoch(imageClientCtx, e.opts.Epoch)
-				}
-				img := images.Image{
-					Target: *desc,
-					// CreatedAt in images.Images is ignored due to a bug of containerd.
-					// See the comment lines for imageClientCtx.
-				}
-
-				sfx := []string{""}
-				if nameCanonical {
-					sfx = append(sfx, "@"+desc.Digest.String())
-				}
-				for _, sfx := range sfx {
-					img.Name = targetName + sfx
-					if _, err := e.opt.Images.Update(imageClientCtx, img); err != nil {
-						if !errors.Is(err, errdefs.ErrNotFound) {
-							return nil, nil, tagDone(err)
-						}
-
-						if _, err := e.opt.Images.Create(imageClientCtx, img); err != nil {
-							return nil, nil, tagDone(err)
-						}
+					// imageClientCtx is used for propagating the epoch to e.opt.Images.Update() and e.opt.Images.Create().
+					//
+					// Ideally, we should be able to propagate the epoch via images.Image.CreatedAt.
+					// However, due to a bug of containerd, we are temporarily stuck with this workaround.
+					// https://github.com/containerd/containerd/issues/8322
+					imageClientCtx := ctx
+					if e.opts.Epoch != nil {
+						imageClientCtx = epoch.WithSourceDateEpoch(imageClientCtx, e.opts.Epoch)
 					}
-				}
-				tagDone(nil)
+					img := images.Image{
+						Target: *desc,
+						// CreatedAt in images.Images is ignored due to a bug of containerd.
+						// See the comment lines for imageClientCtx.
+					}
 
-				if e.unpack {
-					if err := e.unpackImage(ctx, img, src, session.NewGroup(sessionID)); err != nil {
-						return nil, nil, err
+					sfx := []string{""}
+					if nameCanonical {
+						sfx = append(sfx, "@"+desc.Digest.String())
 					}
-				}
-
-				if !e.storeAllowIncomplete {
-					var refs []cache.ImmutableRef
-					if src.Ref != nil {
-						refs = append(refs, src.Ref)
-					}
-					for _, ref := range src.Refs {
-						refs = append(refs, ref)
-					}
-					eg, ctx := errgroup.WithContext(ctx)
-					for _, ref := range refs {
-						ref := ref
-						eg.Go(func() error {
-							remotes, err := ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
-							if err != nil {
-								return err
+					for _, sfx := range sfx {
+						img.Name = targetName + sfx
+						if _, err := e.opt.Images.Update(imageClientCtx, img); err != nil {
+							if !errors.Is(err, errdefs.ErrNotFound) {
+								return nil, nil, tagDone(err)
 							}
-							remote := remotes[0]
-							if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
-								if err := unlazier.Unlazy(ctx); err != nil {
+
+							if _, err := e.opt.Images.Create(imageClientCtx, img); err != nil {
+								return nil, nil, tagDone(err)
+							}
+						}
+					}
+					tagDone(nil)
+
+					if e.unpack {
+						if err := e.unpackImage(ctx, img, src, session.NewGroup(sessionID)); err != nil {
+							return nil, nil, err
+						}
+					}
+
+					if !e.storeAllowIncomplete {
+						var refs []cache.ImmutableRef
+						if src.Ref != nil {
+							refs = append(refs, src.Ref)
+						}
+						for _, ref := range src.Refs {
+							refs = append(refs, ref)
+						}
+						eg, ctx := errgroup.WithContext(ctx)
+						for _, ref := range refs {
+							ref := ref
+							eg.Go(func() error {
+								remotes, err := ref.GetRemotes(ctx, false, e.opts.RefCfg, false, session.NewGroup(sessionID))
+								if err != nil {
 									return err
 								}
-							}
-							return nil
-						})
-					}
-					if err := eg.Wait(); err != nil {
-						return nil, nil, err
+								remote := remotes[0]
+								if unlazier, ok := remote.Provider.(cache.Unlazier); ok {
+									if err := unlazier.Unlazy(ctx); err != nil {
+										return err
+									}
+								}
+								return nil
+							})
+						}
+						if err := eg.Wait(); err != nil {
+							return nil, nil, err
+						}
 					}
 				}
 			}
+
 			if e.push {
-				err := e.pushImage(ctx, src, sessionID, targetName, desc.Digest)
-				if err != nil {
-					return nil, nil, errors.Wrapf(err, "failed to push %v", targetName)
+				push := Push{
+					src:        src,
+					sessionID:  sessionID,
+					targetName: targetName,
+					dgst:       desc.Digest,
 				}
+
+				toPush = append(toPush, push)
 			}
 		}
+
+		// DEPOT: Push images in parallel.
+		eg, ctx2 := errgroup.WithContext(ctx)
+		for _, push := range toPush {
+			func(push Push) {
+				eg.Go(func() error {
+					err := e.pushImage(ctx2, push.src, push.sessionID, push.targetName, push.dgst)
+					if err != nil {
+						return errors.Wrapf(err, "failed to push %v", push.targetName)
+					}
+
+					return nil
+				})
+			}(push)
+		}
+		if err := eg.Wait(); err != nil {
+			return nil, nil, err
+		}
+
 		resp["image.name"] = e.opts.ImageName
 	}
 
@@ -329,6 +396,23 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		return nil, nil, err
 	}
 	resp[exptypes.ExporterImageDescriptorKey] = base64.StdEncoding.EncodeToString(dtdesc)
+
+	// DEPOT: we return all manifests and configs to use for loading the image in the CLI.
+	// We use this because the garbage collector could remove them before download.
+	if opts.ExportImageVersion == ExportImageVersionV2 {
+		exportedImages := make([]depot.ExportedImage, len(committed))
+		for i := range committed {
+			exportedImages[i].Manifest = committed[i].ManifestBytes
+			exportedImages[i].Config = committed[i].ConfigBytes
+		}
+
+		octets, err := json.Marshal(exportedImages)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		resp[depot.ImagesExported] = base64.StdEncoding.EncodeToString(octets)
+	}
 
 	return resp, nil, nil
 }

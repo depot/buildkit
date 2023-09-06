@@ -18,6 +18,7 @@ import (
 
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/secrets"
@@ -365,6 +366,8 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, g session.Group, index
 }
 
 func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out cache.ImmutableRef, retErr error) {
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
 	cacheKey := gs.cacheKey
 	if cacheKey == "" {
 		var err error
@@ -385,7 +388,10 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		return nil, errors.Wrapf(err, "failed to search metadata for %s", snapshotKey)
 	}
 	if len(sis) > 0 {
-		return gs.cache.Get(ctx, sis[0].ID(), nil)
+		return gs.cache.Get(ctx, sis[0].ID(), nil,
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
 	}
 
 	gs.locker.Lock(gs.src.Remote)
@@ -460,7 +466,12 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		}
 	}
 
-	checkoutRef, err := gs.cache.New(ctx, nil, g, cache.WithRecordType(client.UsageRecordTypeGitCheckout), cache.WithDescription(fmt.Sprintf("git snapshot for %s#%s", gs.src.Remote, ref)))
+	checkoutRef, err := gs.cache.New(ctx, nil, g,
+		cache.WithRecordType(client.UsageRecordTypeGitCheckout),
+		cache.WithDescription(fmt.Sprintf("git snapshot for %s#%s", gs.src.Remote, ref)),
+		cache.WithStableDigests(stableDigests),
+		cache.WithVertexDigest(vertexDigest),
+	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create new mutable for %s", urlutil.RedactCredentials(gs.src.Remote))
 	}
@@ -609,6 +620,7 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 	if err != nil {
 		return nil, err
 	}
+	_ = snap.AppendStringSlice("depot.stableDigests", stableDigests...)
 	checkoutRef = nil
 
 	defer func() {

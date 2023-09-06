@@ -182,10 +182,11 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 	sm.Register(os)
 
 	iw, err := imageexporter.NewImageWriter(imageexporter.WriterOpt{
-		Snapshotter:  opt.Snapshotter,
-		ContentStore: opt.ContentStore,
-		Applier:      opt.Applier,
-		Differ:       opt.Differ,
+		Snapshotter:   opt.Snapshotter,
+		ContentStore:  opt.ContentStore,
+		Applier:       opt.Applier,
+		Differ:        opt.Differ,
+		LeasesManager: opt.LeaseManager,
 	})
 	if err != nil {
 		return nil, err
@@ -211,6 +212,10 @@ func NewWorker(ctx context.Context, opt WorkerOpt) (*Worker, error) {
 
 func (w *Worker) Close() error {
 	var rerr error
+	if err := w.MetadataStore.Close(); err != nil {
+		rerr = multierror.Append(rerr, err)
+	}
+
 	for _, provider := range w.NetworkProviders {
 		if err := provider.Close(); err != nil {
 			rerr = multierror.Append(rerr, err)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/moby/buildkit/depot"
 	srctypes "github.com/moby/buildkit/source/types"
 	"github.com/moby/buildkit/util/bklog"
 
@@ -127,13 +128,21 @@ func (ls *localSourceHandler) snapshotWithAnySession(ctx context.Context, g sess
 func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Caller) (out cache.ImmutableRef, retErr error) {
 	sharedKey := ls.src.Name + ":" + ls.src.SharedKeyHint + ":" + caller.SharedKey() // TODO: replace caller.SharedKey() with source based hint from client(absolute-path+nodeid)
 
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
 	var mutable cache.MutableRef
 	sis, err := searchSharedKey(ctx, ls.cm, sharedKey)
 	if err != nil {
 		return nil, err
 	}
 	for _, si := range sis {
-		if m, err := ls.cm.GetMutable(ctx, si.ID()); err == nil {
+		m, err := ls.cm.GetMutable(
+			ctx,
+			si.ID(),
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
+		if err == nil {
 			bklog.G(ctx).Debugf("reusing ref for local: %s", m.ID())
 			mutable = m
 			break
@@ -143,7 +152,13 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 	}
 
 	if mutable == nil {
-		m, err := ls.cm.New(ctx, nil, nil, cache.CachePolicyRetain, cache.WithRecordType(client.UsageRecordTypeLocalSource), cache.WithDescription(fmt.Sprintf("local source for %s", ls.src.Name)))
+		m, err := ls.cm.New(ctx, nil, nil,
+			cache.CachePolicyRetain,
+			cache.WithRecordType(client.UsageRecordTypeLocalSource),
+			cache.WithDescription(fmt.Sprintf("local source for %s", ls.src.Name)),
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
 		if err != nil {
 			return nil, err
 		}

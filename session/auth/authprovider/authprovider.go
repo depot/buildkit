@@ -28,7 +28,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const defaultExpiration = 60
+// DEPOT: we have reduced this from 60 minutes to 10 minutes
+const defaultExpiration = 10
 const dockerHubConfigfileKey = "https://index.docker.io/v1/"
 const dockerHubRegistryHost = "registry-1.docker.io"
 

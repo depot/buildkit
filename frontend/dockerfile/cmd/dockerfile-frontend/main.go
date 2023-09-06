@@ -10,6 +10,7 @@ import (
 	"github.com/moby/buildkit/util/appcontext"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/stack"
+	"github.com/sirupsen/logrus"
 )
 
 func init() {
@@ -28,6 +29,6 @@ func main() {
 
 	if err := grpcclient.RunFromEnvironment(appcontext.Context(), dockerfile.Build); err != nil {
 		bklog.L.Errorf("fatal error: %+v", err)
-		panic(err)
+		logrus.Fatalf("fatal error: %+v", err)
 	}
 }

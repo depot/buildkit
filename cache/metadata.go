@@ -72,6 +72,10 @@ type RefMetadata interface {
 	// generic getters/setters for external packages
 	GetString(string) string
 	SetString(key, val, index string) error
+	// AppendStringSlice will append the values to the existing slice; values are deduplicated.
+	AppendStringSlice(key string, values ...string) error
+	// InsertIfNotExists will insert the value if the key does not exist; otherwise, the value is ignored.
+	InsertIfNotExists(key, value string) error
 
 	GetExternal(string) ([]byte, error)
 	SetExternal(string, []byte) error
@@ -292,7 +296,7 @@ func (md *cacheMetadata) appendURLs(urls []string) error {
 	if len(urls) == 0 {
 		return nil
 	}
-	return md.appendStringSlice(keyURLs, urls...)
+	return md.AppendStringSlice(keyURLs, urls...)
 }
 
 func (md *cacheMetadata) getURLs() []string {
@@ -363,7 +367,7 @@ func (md *cacheMetadata) getSize() int64 {
 }
 
 func (md *cacheMetadata) appendImageRef(s string) error {
-	return md.appendStringSlice(keyImageRefs, s)
+	return md.AppendStringSlice(keyImageRefs, s)
 }
 
 func (md *cacheMetadata) getImageRefs() []string {
@@ -542,7 +546,7 @@ func (md *cacheMetadata) getInt64(key string) (int64, bool) {
 	return i, true
 }
 
-func (md *cacheMetadata) appendStringSlice(key string, values ...string) error {
+func (md *cacheMetadata) AppendStringSlice(key string, values ...string) error {
 	return md.si.GetAndSetValue(key, func(v *metadata.Value) (*metadata.Value, error) {
 		var slice []string
 		if v != nil {
@@ -585,4 +589,13 @@ func (md *cacheMetadata) getStringSlice(key string) []string {
 		return nil
 	}
 	return s
+}
+
+func (md *cacheMetadata) InsertIfNotExists(key, value string) error {
+	return md.si.GetAndSetValue(key, func(v *metadata.Value) (*metadata.Value, error) {
+		if v != nil {
+			return nil, metadata.ErrSkipSetValue
+		}
+		return metadata.NewValue(value)
+	})
 }

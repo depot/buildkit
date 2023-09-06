@@ -89,6 +89,8 @@ func printVerbose(tw *tabwriter.Writer, du []*client.UsageInfo) {
 		printKV(tw, "Mutable", di.Mutable)
 		printKV(tw, "Reclaimable", !di.InUse)
 		printKV(tw, "Shared", di.Shared)
+		printKV(tw, "Stable digest", di.StableDigests)
+		printKV(tw, "Creator digest", di.CreatorDigest)
 		printKV(tw, "Size", fmt.Sprintf("%.2f", units.Bytes(di.Size)))
 		if di.Description != "" {
 			printKV(tw, "Description", di.Description)

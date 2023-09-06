@@ -19,6 +19,7 @@ import (
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/identity"
 	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
 	"github.com/moby/buildkit/util/leaseutil"
@@ -601,7 +602,7 @@ func (h *HistoryQueue) OpenBlobWriter(ctx context.Context, mt string) (_ *Writer
 		lm:    h.hLeaseManager,
 		l:     l,
 		w:     w,
-		dgstr: digest.Canonical.Digester(),
+		dgstr: depot.NewFastDigester(),
 	}, nil
 }
 

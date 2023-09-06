@@ -100,6 +100,7 @@ func main() {
 		buildCommand,
 		debugCommand,
 		dialStdioCommand,
+		healthCommand,
 	}
 
 	var debugEnabled bool

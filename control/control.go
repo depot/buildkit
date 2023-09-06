@@ -3,13 +3,17 @@ package control
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
+	leasesapi "github.com/containerd/containerd/api/services/leases/v1"
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/services/content/contentserver"
 	"github.com/docker/distribution/reference"
 	"github.com/mitchellh/hashstructure/v2"
@@ -20,6 +24,8 @@ import (
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	controlgateway "github.com/moby/buildkit/control/gateway"
+	cloudv3 "github.com/moby/buildkit/depot/api"
+	"github.com/moby/buildkit/depot/api/cloudv3connect"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/exporter/util/epoch"
@@ -47,8 +53,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type Opt struct {
@@ -133,6 +142,21 @@ func (c *Controller) Register(server *grpc.Server) {
 
 	store := &roContentStore{c.opt.ContentStore.WithFallbackNS(c.opt.ContentStore.Namespace() + "_history")}
 	contentapi.RegisterContentServer(server, contentserver.New(store))
+	leasesapi.RegisterLeasesServer(server, &LeaseManager{leasesapi.UnimplementedLeasesServer{}, c.opt.LeaseManager})
+}
+
+// DEPOT: This lease manager is used by the CLI to remove image leases after load.
+type LeaseManager struct {
+	leasesapi.UnimplementedLeasesServer
+	manager leases.Manager
+}
+
+func (m *LeaseManager) Delete(ctx context.Context, req *leasesapi.DeleteRequest) (*emptypb.Empty, error) {
+	err := m.manager.Delete(ctx, leases.Lease{ID: req.ID})
+	if err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
 }
 
 func (c *Controller) DiskUsage(ctx context.Context, r *controlapi.DiskUsageRequest) (*controlapi.DiskUsageResponse, error) {
@@ -152,17 +176,19 @@ func (c *Controller) DiskUsage(ctx context.Context, r *controlapi.DiskUsageReque
 		for _, r := range du {
 			resp.Record = append(resp.Record, &controlapi.UsageRecord{
 				// TODO: add worker info
-				ID:          r.ID,
-				Mutable:     r.Mutable,
-				InUse:       r.InUse,
-				Size_:       r.Size,
-				Parents:     r.Parents,
-				UsageCount:  int64(r.UsageCount),
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				ID:            r.ID,
+				Mutable:       r.Mutable,
+				InUse:         r.InUse,
+				Size_:         r.Size,
+				Parents:       r.Parents,
+				UsageCount:    int64(r.UsageCount),
+				Description:   r.Description,
+				CreatedAt:     r.CreatedAt,
+				LastUsedAt:    r.LastUsedAt,
+				RecordType:    string(r.RecordType),
+				Shared:        r.Shared,
+				StableDigests: r.StableDigests,
+				CreatorDigest: r.CreatorDigest,
 			})
 		}
 	}
@@ -225,17 +251,19 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 			didPrune = true
 			if err := stream.Send(&controlapi.UsageRecord{
 				// TODO: add worker info
-				ID:          r.ID,
-				Mutable:     r.Mutable,
-				InUse:       r.InUse,
-				Size_:       r.Size,
-				Parents:     r.Parents,
-				UsageCount:  int64(r.UsageCount),
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				ID:            r.ID,
+				Mutable:       r.Mutable,
+				InUse:         r.InUse,
+				Size_:         r.Size,
+				Parents:       r.Parents,
+				UsageCount:    int64(r.UsageCount),
+				Description:   r.Description,
+				CreatedAt:     r.CreatedAt,
+				LastUsedAt:    r.LastUsedAt,
+				RecordType:    string(r.RecordType),
+				Shared:        r.Shared,
+				StableDigests: r.StableDigests,
+				CreatorDigest: r.CreatorDigest,
 			}); err != nil {
 				return err
 			}
@@ -455,27 +483,96 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 }
 
 func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Control_StatusServer) error {
+	var spiffeID string
+	ctx := stream.Context()
+	peer, ok := peer.FromContext(ctx)
+	if ok {
+		tlsInfo, ok := peer.AuthInfo.(credentials.TLSInfo)
+		if ok && tlsInfo.SPIFFEID != nil {
+			spiffeID = tlsInfo.SPIFFEID.String()
+		}
+	}
+	statusCh := make(chan client.SolveStatus, 1024)
+	token := os.Getenv("DEPOT_BUILDKIT_TOKEN")
+
 	if err := sendTimestampHeader(stream); err != nil {
 		return err
 	}
 	ch := make(chan *client.SolveStatus, 8)
 
-	eg, ctx := errgroup.WithContext(stream.Context())
+	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		return c.solver.Status(ctx, req.Ref, ch)
 	})
 
+	go func() {
+		if spiffeID == "" || token == "" {
+			return
+		}
+
+		sender := NewDepotClient().ReportStatus(context.Background())
+		sender.RequestHeader().Add("Authorization", "Bearer "+token)
+		defer func() {
+			_, _ = sender.CloseAndReceive()
+		}()
+
+		for ss := range statusCh {
+			for _, sr := range ss.Marshal() {
+				stableDigests := make(map[string]string, len(sr.Vertexes))
+				for _, v := range sr.Vertexes {
+					stableDigests[v.Digest.String()] = v.StableDigest.String()
+				}
+				req := &cloudv3.ReportStatusRequest{
+					SpiffeId:      spiffeID,
+					Status:        sr,
+					StableDigests: stableDigests,
+				}
+
+				attempts := 0
+				for {
+					attempts++
+					err := sender.Send(req)
+					if err == nil {
+						break
+					}
+
+					if attempts > 10 {
+						bklog.G(ctx).WithError(err).Errorf("unable to send status to API, giving up")
+						return
+					}
+
+					bklog.G(ctx).WithError(err).Errorf("unable to send status to API, retrying")
+					time.Sleep(100 * time.Millisecond)
+					_, _ = sender.CloseAndReceive()
+					sender = NewDepotClient().ReportStatus(ctx)
+					sender.RequestHeader().Add("Authorization", "Bearer "+token)
+				}
+			}
+		}
+	}()
+
 	eg.Go(func() error {
+		defer close(statusCh)
 		defer func() {
 			// drain channel on error
 			for range ch {
 			}
 		}()
+
 		for {
 			ss, ok := <-ch
 			if !ok {
 				return nil
 			}
+
+			// DEPOT: we need to make a copy because ss.Marshal() mutates the SolveStatus
+			if spiffeID != "" && token != "" && ss != nil {
+				select {
+				case statusCh <- *ss:
+				default:
+				}
+			}
+
 			for _, sr := range ss.Marshal() {
 				if err := stream.SendMsg(sr); err != nil {
 					return err
@@ -677,4 +774,12 @@ const timestampKey = "buildkit-current-timestamp"
 
 func sendTimestampHeader(srv grpc.ServerStream) error {
 	return srv.SendHeader(metadata.Pairs(timestampKey, time.Now().Format(time.RFC3339Nano)))
+}
+
+func NewDepotClient() cloudv3connect.MachineServiceClient {
+	baseURL := os.Getenv("DEPOT_API_URL")
+	if baseURL == "" {
+		baseURL = "https://api.depot.dev"
+	}
+	return cloudv3connect.NewMachineServiceClient(http.DefaultClient, baseURL)
 }

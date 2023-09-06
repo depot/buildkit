@@ -36,7 +36,7 @@ type SnapshotterFactory struct {
 }
 
 // NewWorkerOpt creates a WorkerOpt.
-func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *idtools.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux bool, parallelismSem *semaphore.Weighted, traceSocket, defaultCgroupParent string) (base.WorkerOpt, error) {
+func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *idtools.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux, gpu bool, parallelismSem *semaphore.Weighted, traceSocket, defaultCgroupParent string) (base.WorkerOpt, error) {
 	var opt base.WorkerOpt
 	name := "runc-" + snFactory.Name
 	root = filepath.Join(root, name)
@@ -73,6 +73,7 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		DNS:                 dns,
 		ApparmorProfile:     apparmorProfile,
 		SELinux:             selinux,
+		GPU:                 gpu,
 		TracingSocket:       traceSocket,
 		DefaultCgroupParent: defaultCgroupParent,
 		ResourceMonitor:     rm,
@@ -90,7 +91,14 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		return opt, err
 	}
 
-	db, err := bolt.Open(filepath.Join(root, "containerdmeta.db"), 0644, nil)
+	options := *bolt.DefaultOptions
+	// Reading bbolt's freelist sometimes fails when the file has a data corruption.
+	// Disabling freelist sync reduces the chance of the breakage.
+	// https://github.com/etcd-io/bbolt/pull/1
+	// https://github.com/etcd-io/bbolt/pull/6
+	options.NoFreelistSync = true
+
+	db, err := bolt.Open(filepath.Join(root, "containerdmeta.db"), 0644, &options)
 	if err != nil {
 		return opt, err
 	}

@@ -45,6 +45,7 @@ import (
 	"github.com/moby/buildkit/version"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"go.etcd.io/bbolt"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -499,15 +500,24 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 
 	// DEPOT: send SBOMs to the API in the background.
 	go func() {
+		ctx := context.Background()
+
 		if sboms == nil || spiffeID == "" || bearer == "" {
 			return
 		}
 
 		apiSBOMs := []*cloudv3.SBOM{}
 		for _, sbom := range sboms {
+			desc := ocispecs.Descriptor{Digest: digest.Digest(sbom.Digest)}
+			statement, err := content.ReadBlob(ctx, c.opt.ContentStore, desc)
+			if err != nil {
+				bklog.G(ctx).WithError(err).Errorf("unable to read SBOM blob")
+				continue
+			}
+
 			apiSBOM := &cloudv3.SBOM{
 				Platform: sbom.Platform,
-				SpdxJson: string(sbom.Statement),
+				SpdxJson: string(statement),
 				Digest:   sbom.Digest,
 			}
 			if sbom.Image != nil {
@@ -529,7 +539,7 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		attempts := 0
 		for {
 			attempts++
-			_, err := NewDepotClient().ReportSBOM(context.Background(), req)
+			_, err := NewDepotClient().ReportSBOM(ctx, req)
 			if err == nil {
 				break
 			}

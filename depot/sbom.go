@@ -10,8 +10,6 @@ import (
 const SBOMsLabel = "depot/sboms"
 
 type SBOM struct {
-	// Statement is the spdx.json SBOM scanning output.
-	Statement []byte `json:"statement"`
 	// Platform is the specific platform that was scanned.
 	Platform string `json:"platform"`
 	// Digest is the content digest of the SBOM.

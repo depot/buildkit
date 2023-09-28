@@ -450,8 +450,8 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 	}
 
 	// DEPOT: Attach all layers to the depot export lease so we can use them to pull the image in the depot client.
-	leaseID, ok := ctx.Value(DepotLeaseKey{}).(string)
-	if ok && leaseID != "" {
+	leaseID := depot.LeaseIDFrom(ctx)
+	if leaseID != "" {
 		for _, layer := range mfst.Layers {
 			ic.opt.LeasesManager.AddResource(ctx, leases.Lease{
 				ID: leaseID,
@@ -551,9 +551,8 @@ func (ic *ImageWriter) commitAttestationsManifest(ctx context.Context, opts *Ima
 
 		if statement.PredicateType == intoto.PredicateSPDX {
 			sbom := depot.SBOM{
-				Statement: data,
-				Platform:  platforms.Format(p.Platform),
-				Digest:    digest.String(),
+				Platform: platforms.Format(p.Platform),
+				Digest:   digest.String(),
 				Image: &depot.ImageSBOM{
 					Name:           opts.ImageName,
 					ManifestDigest: target,
@@ -566,6 +565,16 @@ func (ic *ImageWriter) commitAttestationsManifest(ctx context.Context, opts *Ima
 			return nil, nil, errors.Wrapf(err, "error writing data blob %s", digest)
 		}
 		layers[i] = desc
+	}
+
+	// DEPOT: Attach all layers to the depot export lease so we can use them to pull the SBOMs in the depot client.
+	leaseID := depot.LeaseIDFrom(ctx)
+	if leaseID != "" {
+		lease := leases.Lease{ID: leaseID}
+		for _, layer := range layers {
+			res := leases.Resource{ID: layer.Digest.String(), Type: "content"}
+			ic.opt.LeasesManager.AddResource(ctx, lease, res)
+		}
 	}
 
 	config, err := attestationsConfig(layers)

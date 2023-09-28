@@ -203,9 +203,6 @@ func (e *imageExporterInstance) Config() *exporter.Config {
 	return exporter.NewConfigWithCompression(e.opts.RefCfg.Compression)
 }
 
-// DEPOT: We have a special lease attached to context to inhibit the GC of layers.
-type DepotLeaseKey struct{}
-
 func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source, sessionID string) (_ map[string]string, descref exporter.DescriptorReference, err error) {
 	if src.Metadata == nil {
 		src.Metadata = make(map[string][]byte)
@@ -225,18 +222,11 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 
 	// DEPOT: Create the lease that should live long enough for the image load to complete.
 	if e.UseExportLease {
-		lease, err := e.opt.LeaseManager.Create(
-			ctx,
-			leases.WithRandomID(),
-			leases.WithExpiration(time.Hour),
-			leases.WithLabels(map[string]string{
-				depot.ExportLeaseLabel: sessionID,
-			}),
-		)
+		lease, err := depot.Lease(ctx, e.opt.LeaseManager, sessionID)
 		if err != nil {
 			bklog.G(ctx).Warnf("Unable to create lease for image export %v", err)
 		} else {
-			ctx = context.WithValue(ctx, DepotLeaseKey{}, lease.ID)
+			ctx = depot.WithLeaseID(ctx, lease.ID)
 			// DEPOT: The CLI uses this to delete the lease once the image is loaded.
 			resp[depot.ExportLeaseLabel] = lease.ID
 		}

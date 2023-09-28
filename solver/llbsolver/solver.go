@@ -1,6 +1,7 @@
 package llbsolver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,7 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/leases"
 	"github.com/containerd/continuity/fs"
+	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
@@ -32,6 +36,7 @@ import (
 	"github.com/moby/buildkit/solver/result"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
 	"github.com/moby/buildkit/util/attestation"
+	attestationTypes "github.com/moby/buildkit/util/attestation"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/buildinfo"
 	"github.com/moby/buildkit/util/compression"
@@ -41,6 +46,7 @@ import (
 	"github.com/moby/buildkit/util/tracing/detect"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -598,11 +604,17 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	} else if sbomAttestations := sbom.SBOMOf(cached); sbomAttestations != nil {
 		// If the SBOM was created without creating an image, we still grab what information we have.
 		// These SBOMs will not have any "subjects."
-		resultSBOMs, err = GetSBOM(ctx, j.SessionID, sbomAttestations)
+		w, err := s.workerController.GetDefault()
+		if err != nil {
+			return nil, nil, err
+		}
+		var leaseID string
+		resultSBOMs, leaseID, err = GetSBOM(ctx, w.ContentStore(), w.LeaseManager(), j.SessionID, sbomAttestations)
 		if err == nil && len(resultSBOMs) > 0 {
 			exportedSBOMs, err := depot.EncodeSBOMs(resultSBOMs)
 			if err == nil && exportedSBOMs != "" {
 				exporterResponse[depot.SBOMsLabel] = exportedSBOMs
+				exporterResponse[depot.ExportLeaseLabel] = leaseID
 			}
 		}
 	}
@@ -1029,7 +1041,16 @@ func loadSourcePolicy(b solver.Builder) (*spb.Policy, error) {
 }
 
 // DEPOT: GetSBOM returns the SBOMs of the scanned layers.
-func GetSBOM(ctx context.Context, sessionID string, platformAttestations map[string]*result.Attestation[solver.CachedResult]) ([]depot.SBOM, error) {
+// This assumes that an image has not be created.
+func GetSBOM(ctx context.Context, contentStore content.Store, mgr leases.Manager, sessionID string, platformAttestations map[string]*result.Attestation[solver.CachedResult]) ([]depot.SBOM, string, error) {
+	var leaseID string
+	lease, err := depot.Lease(ctx, mgr, sessionID)
+	if err != nil {
+		bklog.G(ctx).Warnf("Unable to create lease for image export %v", err)
+	} else {
+		leaseID = lease.ID
+	}
+
 	var sboms []depot.SBOM
 	for platform, attestation := range platformAttestations {
 		sbomRef := attestation
@@ -1041,7 +1062,7 @@ func GetSBOM(ctx context.Context, sessionID string, platformAttestations map[str
 		workerRef, ok := sbomResult.Sys().(*worker.WorkerRef)
 		if !ok {
 			bklog.G(ctx).Errorf("invalid reference: %T", sbomResult.Sys())
-			return nil, errors.Errorf("invalid reference: %T", sbomResult.Sys())
+			return nil, "", errors.Errorf("invalid reference: %T", sbomResult.Sys())
 		}
 
 		inp := workerRef.ImmutableRef
@@ -1051,13 +1072,13 @@ func GetSBOM(ctx context.Context, sessionID string, platformAttestations map[str
 		mount, err := inp.Mount(ctx, readOnly, sessionGroup)
 		if err != nil {
 			bklog.G(ctx).Errorf("failed to mount: %v", err)
-			return nil, err
+			return nil, "", err
 		}
 		lm := snapshot.LocalMounter(mount)
 		root, err := lm.Mount()
 		if err != nil {
 			bklog.G(ctx).Errorf("failed to mount: %v", err)
-			return nil, err
+			return nil, "", err
 		}
 		defer func() {
 			if lm != nil {
@@ -1067,20 +1088,43 @@ func GetSBOM(ctx context.Context, sessionID string, platformAttestations map[str
 		fp, err := fs.RootPath(root, "/sbom.spdx.json")
 		if err != nil {
 			bklog.G(ctx).Errorf("failed to get root path: %v", err)
-			return nil, err
+			return nil, "", err
 		}
 		statement, err := os.ReadFile(fp)
 		if err != nil {
 			bklog.G(ctx).Errorf("failed to read file: %v", err)
-			return nil, err
+			return nil, "", err
 		}
 
 		d := depot.NewFastDigester()
 		_, _ = d.Hash().Write(statement)
-		digest := d.Digest().String()
+		digest := d.Digest()
+		desc := ocispecs.Descriptor{
+			MediaType: attestationTypes.MediaTypeDockerSchema2AttestationType,
+			Digest:    digest,
+			Size:      int64(len(statement)),
+			Annotations: map[string]string{
+				"containerd.io/uncompressed": digest.String(),
+				"in-toto.io/predicate-type":  intoto.PredicateSPDX,
+			},
+		}
 
-		sboms = append(sboms, depot.SBOM{Platform: platform, Statement: statement, Digest: digest})
+		r := bytes.NewReader(statement)
+		err = content.WriteBlob(ctx, contentStore, digest.String(), r, desc)
+		if err != nil {
+			return nil, "", errors.Wrapf(err, "error writing SBOM blob %s", digest)
+		}
+
+		sboms = append(sboms, depot.SBOM{
+			Platform: platform,
+			Digest:   digest.String(),
+		})
+
+		mgr.AddResource(ctx, lease, leases.Resource{
+			ID:   digest.String(),
+			Type: "content",
+		})
 	}
 
-	return sboms, nil
+	return sboms, leaseID, nil
 }

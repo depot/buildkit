@@ -51,6 +51,7 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 	}()
 
 	bufW := bufio.NewWriterSize(cw, 128*1024)
+	changeLog := depot.NewChangeLog(sr, ref)
 	var labels map[string]string
 	if compressorFunc != nil {
 		dgstr := depot.NewFastDigester()
@@ -60,7 +61,8 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 		}
 		// Close ensure compressorFunc does some finalization works.
 		defer compressed.Close()
-		if err := overlay.WriteUpperdir(ctx, io.MultiWriter(compressed, dgstr.Hash()), upperdir, lower); err != nil {
+
+		if err := overlay.WriteUpperdir(ctx, io.MultiWriter(compressed, dgstr.Hash()), changeLog, upperdir, lower); err != nil {
 			return emptyDesc, false, errors.Wrap(err, "failed to write compressed diff")
 		}
 		if err := compressed.Close(); err != nil {
@@ -71,9 +73,20 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 		}
 		labels[containerdUncompressed] = dgstr.Digest().String()
 	} else {
-		if err = overlay.WriteUpperdir(ctx, bufW, upperdir, lower); err != nil {
+		if err = overlay.WriteUpperdir(ctx, bufW, changeLog, upperdir, lower); err != nil {
 			return emptyDesc, false, errors.Wrap(err, "failed to write diff")
 		}
+	}
+
+	// DEPOT: write the changelog to the content store.
+	// This is only activated if the `DEPOT_CHANGELOG_ENABLED` env var feature flag is set.
+	chgLabels, err := changeLog.WriteBlob(ctx, sr.cm.ContentStore)
+	if err != nil {
+		return emptyDesc, false, err
+	}
+
+	for k, v := range chgLabels {
+		labels[k] = v
 	}
 
 	if err := bufW.Flush(); err != nil {
@@ -103,7 +116,15 @@ func (sr *immutableRef) tryComputeOverlayBlob(ctx context.Context, lower, upper 
 	// Set uncompressed label if digest already existed without label
 	if _, ok := cinfo.Labels[containerdUncompressed]; !ok {
 		cinfo.Labels[containerdUncompressed] = labels[containerdUncompressed]
-		if _, err := sr.cm.ContentStore.Update(ctx, cinfo, "labels."+containerdUncompressed); err != nil {
+		// DEPOT: add extra changelog labels existing blob.
+		fieldpaths := []string{"labels." + containerdUncompressed}
+		for k, v := range chgLabels {
+			cinfo.Labels[k] = labels[v]
+			fieldpaths = append(fieldpaths, "labels."+k)
+		}
+
+		_, err := sr.cm.ContentStore.Update(ctx, cinfo, fieldpaths...)
+		if err != nil {
 			return emptyDesc, false, errors.Wrap(err, "error setting uncompressed label")
 		}
 	}

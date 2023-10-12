@@ -110,9 +110,13 @@ func GetOverlayLayers(m mount.Mount) ([]string, error) {
 	return l, nil
 }
 
+type ChangeFacade interface {
+	New(changeFn fs.ChangeFunc) fs.ChangeFunc
+}
+
 // WriteUpperdir writes a layer tar archive into the specified writer, based on
 // the diff information stored in the upperdir.
-func WriteUpperdir(ctx context.Context, w io.Writer, upperdir string, lower []mount.Mount) error {
+func WriteUpperdir(ctx context.Context, w io.Writer, changeFacade ChangeFacade, upperdir string, lower []mount.Mount) error {
 	emptyLower, err := os.MkdirTemp("", "buildkit") // empty directory used for the lower of diff view
 	if err != nil {
 		return errors.Wrapf(err, "failed to create temp dir")
@@ -128,7 +132,11 @@ func WriteUpperdir(ctx context.Context, w io.Writer, upperdir string, lower []mo
 	return mount.WithTempMount(ctx, lower, func(lowerRoot string) error {
 		return mount.WithTempMount(ctx, upperView, func(upperViewRoot string) error {
 			cw := archive.NewChangeWriter(&cancellableWriter{ctx, w}, upperViewRoot)
-			if err := Changes(ctx, cw.HandleChange, upperdir, upperViewRoot, lowerRoot); err != nil {
+			handler := cw.HandleChange
+			if changeFacade != nil {
+				handler = changeFacade.New(cw.HandleChange)
+			}
+			if err := Changes(ctx, handler, upperdir, upperViewRoot, lowerRoot); err != nil {
 				if err2 := cw.Close(); err2 != nil {
 					return errors.Wrapf(err, "failed to record upperdir changes (close error: %v)", err2)
 				}

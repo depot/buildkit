@@ -390,10 +390,16 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 	if opts.ExportImageVersion == ExportImageVersionV2 {
 		exportedImages := make([]depot.ExportedImage, len(committed))
 		sboms := make([]depot.SBOM, 0, len(committed))
+		changelogs := make([]ocispecs.Descriptor, 0, len(committed))
+		// DEPOT: len(committed) == num platforms (e.g. linux/amd64, linux/386)
 		for i := range committed {
 			exportedImages[i].Manifest = committed[i].ManifestBytes
 			exportedImages[i].Config = committed[i].ConfigBytes
 			sboms = append(sboms, committed[i].SBOMs...)
+
+			if cl := committed[i].Changelog; cl != nil {
+				changelogs = append(changelogs, *cl)
+			}
 		}
 
 		octets, err := json.Marshal(exportedImages)
@@ -411,6 +417,14 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 			if resultSBOMs != "" {
 				resp[depot.SBOMsLabel] = resultSBOMs
 			}
+		}
+
+		if len(changelogs) > 0 {
+			resultChangelog, err := json.Marshal(changelogs)
+			if err != nil {
+				return nil, nil, err
+			}
+			resp[depot.ChangeLogLabel] = string(resultChangelog)
 		}
 	}
 

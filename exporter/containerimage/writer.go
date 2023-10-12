@@ -150,6 +150,15 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 		if err != nil {
 			return nil, nil, err
 		}
+
+		changelogManifest, err := ic.commitChangelogManifest(ctx, p, &remotes[0])
+		if err != nil {
+			return nil, nil, err
+		}
+		if changelogManifest != nil {
+			committed.Changelog = changelogManifest
+		}
+
 		if committed.Manifest.Annotations == nil {
 			committed.Manifest.Annotations = make(map[string]string)
 		}
@@ -236,11 +245,22 @@ func (ic *ImageWriter) Commit(ctx context.Context, inp *exporter.Source, session
 		if err != nil {
 			return nil, nil, err
 		}
+
 		dp := p.Platform
 		committed.Manifest.Platform = &dp
 		idx.Manifests = append(idx.Manifests, committed.Manifest)
 
 		labels[fmt.Sprintf("containerd.io/gc.ref.content.%d", i)] = committed.Manifest.Digest.String()
+
+		changelogManifest, err := ic.commitChangelogManifest(ctx, p, remote)
+		if err != nil {
+			return nil, nil, err
+		}
+		if changelogManifest != nil {
+			committed.Changelog = changelogManifest
+			// DEPOT: 16k gives lots of room for other platforms.
+			labels[fmt.Sprintf("containerd.io/gc.ref.content.%d", i+16384)] = changelogManifest.Digest.String()
+		}
 
 		if attestations, ok := inp.Attestations[p.ID]; ok {
 			attestations, err := attestation.Unbundle(ctx, session.NewGroup(sessionID), attestations)
@@ -381,6 +401,8 @@ type Committed struct {
 	ConfigBytes []byte
 	// SBOMs is the spdx document for the specific image and platform.
 	SBOMs []depot.SBOM
+	// Changelog is a descriptor for an artifact manifest that contains all the changelogs.
+	Changelog *ocispecs.Descriptor
 }
 
 func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *ImageCommitOpts, ref cache.ImmutableRef, config []byte, remote *solver.Remote, annotations *Annotations, inlineCache []byte, buildInfo []byte, epoch *time.Time, sg session.Group) (*Committed, error) {
@@ -516,6 +538,85 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 	}
 
 	return committed, nil
+}
+
+// DEPOT: Writes a manifest referring to all changelog manifests.
+func (ic *ImageWriter) commitChangelogManifest(ctx context.Context, platform exptypes.Platform, remote *solver.Remote) (*ocispecs.Descriptor, error) {
+	if !depot.ChangelogFeatureEnabled() {
+		return nil, nil
+	}
+
+	mfst := ocispecs.Artifact{MediaType: ocispecs.MediaTypeArtifactManifest}
+
+	labels := map[string]string{}
+	for i, desc := range remote.Descriptors {
+		info, err := ic.opt.ContentStore.Info(ctx, desc.Digest)
+		if err != nil {
+			return nil, err
+		}
+
+		if info.Labels == nil {
+			continue
+		}
+		ld, ok := info.Labels[depot.ChangeLogLabel]
+		if !ok {
+			continue
+		}
+
+		logDigest := digest.Digest(ld)
+		_, err = ic.opt.ContentStore.Info(ctx, logDigest)
+		if err != nil {
+			continue
+		}
+
+		// DEPOT: this gives room for 16k layers.
+		labels[fmt.Sprintf("containerd.io/gc.ref.content.%d", i+16384)] = logDigest.String()
+		mfst.Blobs = append(mfst.Blobs, ocispecs.Descriptor{
+			Digest:      logDigest,
+			Size:        info.Size,
+			Platform:    &platform.Platform,
+			Annotations: map[string]string{depot.CreatorLabel: desc.Digest.String()},
+		})
+	}
+
+	if len(mfst.Blobs) == 0 {
+		return nil, nil
+	}
+
+	// DEPOT: Attach all layers to the depot export lease so we can use them to pull the image in the depot client.
+	leaseID := depot.LeaseIDFrom(ctx)
+	if leaseID != "" {
+		for _, blob := range mfst.Blobs {
+			ic.opt.LeasesManager.AddResource(ctx, leases.Lease{
+				ID: leaseID,
+			},
+				leases.Resource{
+					ID:   blob.Digest.String(),
+					Type: "content",
+				})
+		}
+	}
+
+	mfstJSON, err := json.MarshalIndent(mfst, "", "  ")
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to marshal manifest")
+	}
+
+	mfstDigest := digest.FromBytes(mfstJSON)
+	mfstDesc := ocispecs.Descriptor{
+		Digest: mfstDigest,
+		Size:   int64(len(mfstJSON)),
+	}
+
+	mfstDone := progress.OneOff(ctx, "exporting changelog manifest "+mfstDigest.String())
+	{
+		if err := content.WriteBlob(ctx, ic.opt.ContentStore, mfstDigest.String(), bytes.NewReader(mfstJSON), mfstDesc, content.WithLabels((labels))); err != nil {
+			return nil, mfstDone(errors.Wrapf(err, "error writing changelog manifest blob %s", mfstDigest))
+		}
+	}
+	mfstDone(nil)
+
+	return &mfstDesc, nil
 }
 
 // DEPOT: Returns the manifest descriptor and all SBOMs.

@@ -554,6 +554,16 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		}
 	}()
 
+	// DEPOT: send changelogs in the background.
+	opt := &depot.SendChangeLogsOpt{
+		SpiffeID:   spiffeID,
+		Bearer:     bearer,
+		Provider:   c.opt.ContentStore,
+		Changelogs: resp.ExporterResponse[depot.ChangeLogLabel],
+		ImageName:  resp.ExporterResponse["image.name"],
+	}
+	go depot.SendChangeLogs(context.Background(), opt)
+
 	return &controlapi.SolveResponse{
 		ExporterResponse: resp.ExporterResponse,
 	}, nil

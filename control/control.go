@@ -482,6 +482,16 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		procs = append(procs, proc.ProvenanceProcessor(attrs))
 	}
 
+	// DEPOT: metadata contains information such as the dockerfile.
+	metadata := map[string][]byte{}
+	copyMetadata := func(ctx context.Context, result *llbsolver.Result, s *llbsolver.Solver, j *solver.Job) (*llbsolver.Result, error) {
+		for k, v := range result.Metadata {
+			metadata[k] = v
+		}
+		return result, nil
+	}
+	procs = append(procs, copyMetadata)
+
 	resp, sboms, err := c.solver.Solve(ctx, req.Ref, req.Session, frontend.SolveRequest{
 		Frontend:       req.Frontend,
 		Definition:     req.Definition,
@@ -552,6 +562,24 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 			bklog.G(ctx).WithError(err).Errorf("unable to send SBOM to API, retrying")
 			time.Sleep(100 * time.Millisecond)
 		}
+	}()
+
+	// DEPOT: send source dockerfile to the API in the background.
+	go func() {
+		ctx := context.Background()
+		buildTarget := req.FrontendAttrs[depot.BuildArgTarget]
+		name := string(metadata[depot.BuildDockerfileName])
+		contents := string(metadata[depot.BuildDockerfile])
+
+		req := &depot.BuildContextRequest{
+			SpiffeID:       spiffeID,
+			Bearer:         bearer,
+			BuildTarget:    buildTarget,
+			DockerfileName: name,
+			Contents:       contents,
+		}
+
+		depot.SendBuildContext(ctx, req)
 	}()
 
 	return &controlapi.SolveResponse{

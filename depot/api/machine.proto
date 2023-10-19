@@ -10,6 +10,7 @@ service MachineService {
   rpc Usage(UsageRequest) returns (UsageResponse);
   rpc ReportStatus(stream ReportStatusRequest) returns (ReportStatusResponse);
   rpc ReportSBOM(ReportSBOMRequest) returns (ReportSBOMResponse);
+  rpc ReportBuildContext(ReportBuildContextRequest) returns (ReportBuildContextResponse);
 }
 
 message RegisterMachineRequest {
@@ -81,6 +82,10 @@ message RegisterMachineResponse {
 
     // Disable fstrim on shutdown
     optional bool disable_fstrim = 14;
+    // Number of concurrent fetchers/pushers per domain name
+    optional int32 resolver_concurrency = 15;
+    // Enable buildkit debug logging
+    optional bool enable_debug_logging = 16;
   }
 
   // Specifies sending buildkit profiling data to a remote endpoint.
@@ -154,3 +159,16 @@ message Image {
 }
 
 message ReportSBOMResponse {}
+
+message ReportBuildContextRequest {
+  string spiffe_id = 1;
+  Dockerfile dockerfile = 2;
+}
+
+message Dockerfile {
+  string target = 1;
+  string filename = 2;
+  string contents = 3;
+}
+
+message ReportBuildContextResponse {}

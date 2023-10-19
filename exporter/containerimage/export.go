@@ -1,6 +1,7 @@
 package containerimage
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -373,6 +374,11 @@ func (e *imageExporterInstance) Export(ctx context.Context, src *exporter.Source
 		resp["image.name"] = e.opts.ImageName
 	}
 
+	err = DepotPush(ctx, committed, e.opt.ImageWriter.ContentStore())
+	if err != nil {
+		return nil, nil, err
+	}
+
 	resp[exptypes.ExporterImageDigestKey] = desc.Digest.String()
 	if v, ok := desc.Annotations[exptypes.ExporterConfigDigestKey]; ok {
 		resp[exptypes.ExporterImageConfigDigestKey] = v
@@ -573,4 +579,151 @@ func (d *descriptorReference) Descriptor() ocispecs.Descriptor {
 
 func (d *descriptorReference) Release() error {
 	return d.release(context.TODO())
+}
+
+func DepotPush(ctx context.Context, committed []*Committed, store content.Store) error {
+	if len(committed) == 0 {
+		return nil
+	}
+
+	push := committed[0]
+
+	readerAt, err := store.ReaderAt(ctx, push.Manifest)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = readerAt.Close() }()
+
+	size := readerAt.Size()
+	const PartSize = int64(1024 * 1024 * 10)
+
+	total := make([]byte, size)
+	_, err = readerAt.ReadAt(total, 0)
+	if err != nil {
+		return err
+	}
+
+	var manifest ocispecs.Manifest
+	err = json.Unmarshal(total, &manifest)
+	if err != nil {
+		return err
+	}
+
+	session := depot.NewUploadSession(depot.UploadKindManifest, push.Manifest.Digest)
+
+	err = session.Create(ctx)
+	if err != nil && !errors.Is(err, depot.ErrAlreadyExists) {
+		bklog.G(ctx).Warnf("Unable to create upload session (%s) %v", session.SessionID(), err)
+		return err
+	}
+	bklog.G(ctx).Infof("Upload session (%s) created", session.SessionID())
+
+	if !errors.Is(err, depot.ErrAlreadyExists) {
+		err = session.UploadPart(ctx, 1, bytes.NewReader(total))
+		if err != nil {
+			bklog.G(ctx).Warnf("Unable to upload part (%s) %v", session.SessionID(), err)
+			_ = session.Abort(ctx)
+			return err
+		}
+
+		err = session.Complete(ctx)
+		if err != nil {
+			bklog.G(ctx).Warnf("Unable to complete upload session (%s) %v", session.SessionID(), err)
+			_ = session.Abort(ctx)
+			return err
+		}
+	}
+	{
+		readerAt, err := store.ReaderAt(ctx, manifest.Config)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = readerAt.Close() }()
+
+		size := readerAt.Size()
+		total := make([]byte, size)
+		_, err = readerAt.ReadAt(total, 0)
+		if err != nil {
+			return err
+		}
+
+		session := depot.NewUploadSession(depot.UploadKindConfig, manifest.Config.Digest)
+
+		err = session.Create(ctx)
+		if err != nil && !errors.Is(err, depot.ErrAlreadyExists) {
+			bklog.G(ctx).Warnf("Unable to create upload session (%s) %v", session.SessionID(), err)
+			return err
+		}
+		bklog.G(ctx).Infof("Upload session (%s) created", session.SessionID())
+
+		if !errors.Is(err, depot.ErrAlreadyExists) {
+			err = session.UploadPart(ctx, 1, bytes.NewReader(total))
+			if err != nil {
+				bklog.G(ctx).Warnf("Unable to upload part (%s) %v", session.SessionID(), err)
+				_ = session.Abort(ctx)
+				return err
+			}
+
+			err = session.Complete(ctx)
+			if err != nil {
+				bklog.G(ctx).Warnf("Unable to complete upload session (%s) %v", session.SessionID(), err)
+				_ = session.Abort(ctx)
+				return err
+			}
+		}
+	}
+
+	for _, layer := range manifest.Layers {
+		readerAt, err := store.ReaderAt(ctx, layer)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = readerAt.Close() }()
+
+		session := depot.NewUploadSession(depot.UploadKindBlob, layer.Digest)
+		err = session.Create(ctx)
+		if err != nil {
+			if errors.Is(err, depot.ErrAlreadyExists) {
+				continue
+			}
+			bklog.G(ctx).Warnf("Unable to create upload session (%s) %v", session.SessionID(), err)
+			return err
+		}
+		bklog.G(ctx).Infof("Upload session (%s) created", session.SessionID())
+
+		size := readerAt.Size()
+		offset := int64(0)
+		part := 1
+		for offset < size {
+			bufSize := size - offset
+			if bufSize > PartSize {
+				bufSize = PartSize
+			}
+			buf := make([]byte, bufSize)
+			n, err := readerAt.ReadAt(buf, offset)
+			if err != nil {
+				_ = session.Abort(ctx)
+				return err
+			}
+
+			bklog.G(ctx).Debugf("Uploading part %d size %d", part, bufSize)
+			err = session.UploadPart(ctx, int(part), bytes.NewReader(buf[:n]))
+			if err != nil {
+				_ = session.Abort(ctx)
+				return err
+			}
+
+			offset += int64(n)
+			part += 1
+		}
+
+		err = session.Complete(ctx)
+		if err != nil {
+			bklog.G(ctx).Warnf("Unable to complete upload session (%s) %v", session.SessionID(), err)
+			_ = session.Abort(ctx)
+			return err
+		}
+	}
+
+	return nil
 }

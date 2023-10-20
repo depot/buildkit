@@ -25,7 +25,7 @@ env:
   REPO_SLUG_ORIGIN: "moby/buildkit:v0.11.0-rc4"
   REPO_SLUG_TARGET: "moby/buildkit"
   DF_REPO_SLUG_TARGET: "docker/dockerfile-upstream"
-  PLATFORMS: "linux/amd64,linux/arm/v7,linux/arm64,linux/s390x,linux/ppc64le,linux/riscv64"
+  PLATFORMS: "linux/amd64,linux/arm/v7,linux/arm64"
   CACHE_GHA_SCOPE_IT: "integration-tests"
   CACHE_GHA_SCOPE_BINARIES: "binaries"
   CACHE_GHA_SCOPE_CROSS: "cross"
@@ -205,98 +205,6 @@ jobs:
         run: |
           hack/s3_test/run_test.sh
 
-  test-azblob:
-    runs-on: ubuntu-latest-16-cores
-    needs:
-      - base
-    steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v3
-      -
-        name: Expose GitHub Runtime
-        uses: crazy-max/ghaction-github-runtime@v2
-      -
-        name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          version: ${{ env.BUILDX_VERSION }}
-          driver-opts: image=${{ env.REPO_SLUG_ORIGIN }}
-          buildkitd-flags: --debug
-      -
-        name: Test
-        run: |
-          hack/azblob_test/run_test.sh
-
-  test-os:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          # - ubuntu-20.04
-          # - macOS-11
-          - windows-2022
-    steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v3
-      -
-        name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-      -
-        name: Go mod
-        run: |
-          go mod download
-      -
-        name: Test
-        env:
-          TMPDIR: ${{ runner.temp }}
-          SKIP_INTEGRATION_TESTS: 1
-        run: |
-          mkdir -p ./coverage
-          go test -coverprofile=./coverage/coverage-${{ github.job }}-${{ matrix.os }}.txt -covermode=atomic ${TESTFLAGS} ./...
-        shell: bash
-      -
-        name: Upload coverage file
-        uses: actions/upload-artifact@v3
-        with:
-          name: coverage
-          path: ./coverage
-
-  upload-coverage:
-    runs-on: ubuntu-latest-16-cores
-    needs: [test, test-os]
-    steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v3
-      -
-        name: Download coverage files
-        uses: actions/download-artifact@v3
-        with:
-          name: coverage
-          path: ./coverage
-      -
-        name: List coverage files
-        uses: actions/github-script@v6
-        id: files
-        with:
-          result-encoding: string
-          script: |
-            return require('fs').readdirSync('./coverage', {withFileTypes: true})
-              .filter(item => !item.isDirectory())
-              .map(item => `./coverage/${item.name}`)
-              .join(',');
-      -
-        name: Send to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ${{ steps.files.outputs.result }}
-
   cross:
     runs-on: ubuntu-latest-16-cores
     steps:
@@ -321,7 +229,7 @@ jobs:
         run: |
           ./hack/cross
         env:
-          PLATFORMS: ${{ env.PLATFORMS }},darwin/amd64,darwin/arm64,windows/amd64,windows/arm64
+          PLATFORMS: ${{ env.PLATFORMS }}
           RUNC_PLATFORMS: ${{ env.PLATFORMS }}
           CACHE_FROM: type=gha,scope=${{ env.CACHE_GHA_SCOPE_CROSS }}
           CACHE_TO: type=gha,scope=${{ env.CACHE_GHA_SCOPE_CROSS }}
@@ -421,7 +329,7 @@ jobs:
           ./hack/release-tar "${{ needs.release-base.outputs.tag }}" release-out
         env:
           RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          PLATFORMS: ${{ env.PLATFORMS }},darwin/amd64,darwin/arm64,windows/amd64,windows/arm64
+          PLATFORMS: ${{ env.PLATFORMS }}
           CACHE_FROM: type=gha,scope=${{ env.CACHE_GHA_SCOPE_BINARIES }} type=gha,scope=${{ env.CACHE_GHA_SCOPE_CROSS }}
       -
         name: Upload artifacts
@@ -517,6 +425,6 @@ jobs:
           ./frontend/dockerfile/cmd/dockerfile-frontend/hack/release "${{ needs.frontend-base.outputs.typ }}" "${{ matrix.tag }}" "$DF_REPO_SLUG_TARGET" "${{ needs.frontend-base.outputs.push }}"
         env:
           RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          PLATFORMS: ${{ env.PLATFORMS }},linux/386,linux/mips,linux/mipsle,linux/mips64,linux/mips64le
+          PLATFORMS: ${{ env.PLATFORMS }}
           CACHE_FROM: type=gha,scope=${{ env.CACHE_SCOPE }}
           CACHE_TO: type=gha,scope=${{ env.CACHE_SCOPE }}

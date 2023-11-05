@@ -200,6 +200,15 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 		return nil, err
 	}
 
+	var updater filesync.CacheUpdater = &cacheUpdater{cc, mount.IdentityMapping()}
+	// DEPOT: capture the context sync changes.
+	if ls.src.Name == "context" && depot.ContextLogFeatureEnabled() {
+		pw, _, _ := progress.NewFromContext(ctx)
+		defer func() { _ = pw.Close() }()
+
+		updater = depot.NewContextLog(updater, pw)
+	}
+
 	opt := filesync.FSSendRequestOpt{
 		Name:             ls.src.Name,
 		IncludePatterns:  ls.src.IncludePatterns,
@@ -207,7 +216,7 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 		FollowPaths:      ls.src.FollowPaths,
 		OverrideExcludes: false,
 		DestDir:          dest,
-		CacheUpdater:     &cacheUpdater{cc, mount.IdentityMapping()},
+		CacheUpdater:     updater,
 		ProgressCb:       newProgressHandler(ctx, "transferring "+ls.src.Name+":"),
 		Differ:           ls.src.Differ,
 	}

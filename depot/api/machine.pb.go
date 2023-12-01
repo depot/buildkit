@@ -73,6 +73,58 @@ func (RegisterMachineResponse_Mount_FilesystemType) EnumDescriptor() ([]byte, []
 	return file_machine_proto_rawDescGZIP(), []int{1, 0, 0}
 }
 
+type ReportContextItemsRequest_Type int32
+
+const (
+	ReportContextItemsRequest_TYPE_UNSPECIFIED ReportContextItemsRequest_Type = 0
+	ReportContextItemsRequest_TYPE_FILE        ReportContextItemsRequest_Type = 1
+	ReportContextItemsRequest_TYPE_DIRECTORY   ReportContextItemsRequest_Type = 2
+	ReportContextItemsRequest_TYPE_SYMLINK     ReportContextItemsRequest_Type = 3
+)
+
+// Enum value maps for ReportContextItemsRequest_Type.
+var (
+	ReportContextItemsRequest_Type_name = map[int32]string{
+		0: "TYPE_UNSPECIFIED",
+		1: "TYPE_FILE",
+		2: "TYPE_DIRECTORY",
+		3: "TYPE_SYMLINK",
+	}
+	ReportContextItemsRequest_Type_value = map[string]int32{
+		"TYPE_UNSPECIFIED": 0,
+		"TYPE_FILE":        1,
+		"TYPE_DIRECTORY":   2,
+		"TYPE_SYMLINK":     3,
+	}
+)
+
+func (x ReportContextItemsRequest_Type) Enum() *ReportContextItemsRequest_Type {
+	p := new(ReportContextItemsRequest_Type)
+	*p = x
+	return p
+}
+
+func (x ReportContextItemsRequest_Type) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReportContextItemsRequest_Type) Descriptor() protoreflect.EnumDescriptor {
+	return file_machine_proto_enumTypes[1].Descriptor()
+}
+
+func (ReportContextItemsRequest_Type) Type() protoreflect.EnumType {
+	return &file_machine_proto_enumTypes[1]
+}
+
+func (x ReportContextItemsRequest_Type) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReportContextItemsRequest_Type.Descriptor instead.
+func (ReportContextItemsRequest_Type) EnumDescriptor() ([]byte, []int) {
+	return file_machine_proto_rawDescGZIP(), []int{18, 0}
+}
+
 type RegisterMachineRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1108,6 +1160,99 @@ func (*ReportBuildContextResponse) Descriptor() ([]byte, []int) {
 	return file_machine_proto_rawDescGZIP(), []int{17}
 }
 
+type ReportContextItemsRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	SpiffeId string                            `protobuf:"bytes,1,opt,name=spiffe_id,json=spiffeId,proto3" json:"spiffe_id,omitempty"`
+	Items    []*ReportContextItemsRequest_Item `protobuf:"bytes,2,rep,name=items,proto3" json:"items,omitempty"`
+}
+
+func (x *ReportContextItemsRequest) Reset() {
+	*x = ReportContextItemsRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_machine_proto_msgTypes[18]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ReportContextItemsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportContextItemsRequest) ProtoMessage() {}
+
+func (x *ReportContextItemsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_machine_proto_msgTypes[18]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportContextItemsRequest.ProtoReflect.Descriptor instead.
+func (*ReportContextItemsRequest) Descriptor() ([]byte, []int) {
+	return file_machine_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ReportContextItemsRequest) GetSpiffeId() string {
+	if x != nil {
+		return x.SpiffeId
+	}
+	return ""
+}
+
+func (x *ReportContextItemsRequest) GetItems() []*ReportContextItemsRequest_Item {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+type ReportContextItemsResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *ReportContextItemsResponse) Reset() {
+	*x = ReportContextItemsResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_machine_proto_msgTypes[19]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ReportContextItemsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportContextItemsResponse) ProtoMessage() {}
+
+func (x *ReportContextItemsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_machine_proto_msgTypes[19]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportContextItemsResponse.ProtoReflect.Descriptor instead.
+func (*ReportContextItemsResponse) Descriptor() ([]byte, []int) {
+	return file_machine_proto_rawDescGZIP(), []int{19}
+}
+
 type RegisterMachineRequest_AWSRegistration struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -1120,7 +1265,7 @@ type RegisterMachineRequest_AWSRegistration struct {
 func (x *RegisterMachineRequest_AWSRegistration) Reset() {
 	*x = RegisterMachineRequest_AWSRegistration{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_machine_proto_msgTypes[18]
+		mi := &file_machine_proto_msgTypes[20]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1133,7 +1278,7 @@ func (x *RegisterMachineRequest_AWSRegistration) String() string {
 func (*RegisterMachineRequest_AWSRegistration) ProtoMessage() {}
 
 func (x *RegisterMachineRequest_AWSRegistration) ProtoReflect() protoreflect.Message {
-	mi := &file_machine_proto_msgTypes[18]
+	mi := &file_machine_proto_msgTypes[20]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1178,7 +1323,7 @@ type RegisterMachineResponse_Mount struct {
 func (x *RegisterMachineResponse_Mount) Reset() {
 	*x = RegisterMachineResponse_Mount{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_machine_proto_msgTypes[19]
+		mi := &file_machine_proto_msgTypes[21]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1191,7 +1336,7 @@ func (x *RegisterMachineResponse_Mount) String() string {
 func (*RegisterMachineResponse_Mount) ProtoMessage() {}
 
 func (x *RegisterMachineResponse_Mount) ProtoReflect() protoreflect.Message {
-	mi := &file_machine_proto_msgTypes[19]
+	mi := &file_machine_proto_msgTypes[21]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1252,7 +1397,7 @@ type RegisterMachineResponse_PendingTask struct {
 func (x *RegisterMachineResponse_PendingTask) Reset() {
 	*x = RegisterMachineResponse_PendingTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_machine_proto_msgTypes[20]
+		mi := &file_machine_proto_msgTypes[22]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1265,7 +1410,7 @@ func (x *RegisterMachineResponse_PendingTask) String() string {
 func (*RegisterMachineResponse_PendingTask) ProtoMessage() {}
 
 func (x *RegisterMachineResponse_PendingTask) ProtoReflect() protoreflect.Message {
-	mi := &file_machine_proto_msgTypes[20]
+	mi := &file_machine_proto_msgTypes[22]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1311,7 +1456,7 @@ type RegisterMachineResponse_BuildKitTask struct {
 func (x *RegisterMachineResponse_BuildKitTask) Reset() {
 	*x = RegisterMachineResponse_BuildKitTask{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_machine_proto_msgTypes[21]
+		mi := &file_machine_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1324,7 +1469,7 @@ func (x *RegisterMachineResponse_BuildKitTask) String() string {
 func (*RegisterMachineResponse_BuildKitTask) ProtoMessage() {}
 
 func (x *RegisterMachineResponse_BuildKitTask) ProtoReflect() protoreflect.Message {
-	mi := &file_machine_proto_msgTypes[21]
+	mi := &file_machine_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1459,7 +1604,7 @@ type RegisterMachineResponse_Profiler struct {
 func (x *RegisterMachineResponse_Profiler) Reset() {
 	*x = RegisterMachineResponse_Profiler{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_machine_proto_msgTypes[22]
+		mi := &file_machine_proto_msgTypes[24]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1472,7 +1617,7 @@ func (x *RegisterMachineResponse_Profiler) String() string {
 func (*RegisterMachineResponse_Profiler) ProtoMessage() {}
 
 func (x *RegisterMachineResponse_Profiler) ProtoReflect() protoreflect.Message {
-	mi := &file_machine_proto_msgTypes[22]
+	mi := &file_machine_proto_msgTypes[24]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1528,7 +1673,7 @@ type RegisterMachineResponse_Mount_CephVolume struct {
 func (x *RegisterMachineResponse_Mount_CephVolume) Reset() {
 	*x = RegisterMachineResponse_Mount_CephVolume{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_machine_proto_msgTypes[23]
+		mi := &file_machine_proto_msgTypes[25]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1541,7 +1686,7 @@ func (x *RegisterMachineResponse_Mount_CephVolume) String() string {
 func (*RegisterMachineResponse_Mount_CephVolume) ProtoMessage() {}
 
 func (x *RegisterMachineResponse_Mount_CephVolume) ProtoReflect() protoreflect.Message {
-	mi := &file_machine_proto_msgTypes[23]
+	mi := &file_machine_proto_msgTypes[25]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1583,6 +1728,77 @@ func (x *RegisterMachineResponse_Mount_CephVolume) GetCephConf() string {
 		return x.CephConf
 	}
 	return ""
+}
+
+type ReportContextItemsRequest_Item struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Path       string                         `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Type       ReportContextItemsRequest_Type `protobuf:"varint,2,opt,name=type,proto3,enum=depot.cloud.v3.ReportContextItemsRequest_Type" json:"type,omitempty"`
+	SizeBytes  int64                          `protobuf:"varint,3,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	DurationMs int32                          `protobuf:"varint,4,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+}
+
+func (x *ReportContextItemsRequest_Item) Reset() {
+	*x = ReportContextItemsRequest_Item{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_machine_proto_msgTypes[27]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *ReportContextItemsRequest_Item) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportContextItemsRequest_Item) ProtoMessage() {}
+
+func (x *ReportContextItemsRequest_Item) ProtoReflect() protoreflect.Message {
+	mi := &file_machine_proto_msgTypes[27]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportContextItemsRequest_Item.ProtoReflect.Descriptor instead.
+func (*ReportContextItemsRequest_Item) Descriptor() ([]byte, []int) {
+	return file_machine_proto_rawDescGZIP(), []int{18, 0}
+}
+
+func (x *ReportContextItemsRequest_Item) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ReportContextItemsRequest_Item) GetType() ReportContextItemsRequest_Type {
+	if x != nil {
+		return x.Type
+	}
+	return ReportContextItemsRequest_TYPE_UNSPECIFIED
+}
+
+func (x *ReportContextItemsRequest_Item) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *ReportContextItemsRequest_Item) GetDurationMs() int32 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
 }
 
 var File_machine_proto protoreflect.FileDescriptor
@@ -1814,43 +2030,75 @@ var file_machine_proto_rawDesc = []byte{
 	0x1a, 0x0a, 0x08, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x73, 0x18, 0x03, 0x20, 0x01, 0x28,
 	0x09, 0x52, 0x08, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x73, 0x22, 0x1c, 0x0a, 0x1a, 0x52,
 	0x65, 0x70, 0x6f, 0x72, 0x74, 0x42, 0x75, 0x69, 0x6c, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78,
-	0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x32, 0xc5, 0x04, 0x0a, 0x0e, 0x4d, 0x61,
-	0x63, 0x68, 0x69, 0x6e, 0x65, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12, 0x64, 0x0a, 0x0f,
-	0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x65, 0x12,
-	0x26, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33,
-	0x2e, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x65,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e,
-	0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65,
-	0x72, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
-	0x30, 0x01, 0x12, 0x68, 0x0a, 0x11, 0x50, 0x69, 0x6e, 0x67, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e,
-	0x65, 0x48, 0x65, 0x61, 0x6c, 0x74, 0x68, 0x12, 0x28, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e,
-	0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x50, 0x69, 0x6e, 0x67, 0x4d, 0x61, 0x63,
-	0x68, 0x69, 0x6e, 0x65, 0x48, 0x65, 0x61, 0x6c, 0x74, 0x68, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
-	0x74, 0x1a, 0x29, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e,
-	0x76, 0x33, 0x2e, 0x50, 0x69, 0x6e, 0x67, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x65, 0x48, 0x65,
-	0x61, 0x6c, 0x74, 0x68, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x44, 0x0a, 0x05,
-	0x55, 0x73, 0x61, 0x67, 0x65, 0x12, 0x1c, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c,
-	0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x55, 0x73, 0x61, 0x67, 0x65, 0x52, 0x65, 0x71, 0x75,
-	0x65, 0x73, 0x74, 0x1a, 0x1d, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75,
-	0x64, 0x2e, 0x76, 0x33, 0x2e, 0x55, 0x73, 0x61, 0x67, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
-	0x73, 0x65, 0x12, 0x5b, 0x0a, 0x0c, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x74, 0x61, 0x74,
-	0x75, 0x73, 0x12, 0x23, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64,
-	0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73,
-	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x24, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e,
-	0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53,
-	0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x28, 0x01, 0x12,
-	0x53, 0x0a, 0x0a, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x42, 0x4f, 0x4d, 0x12, 0x21, 0x2e,
-	0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52,
-	0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x42, 0x4f, 0x4d, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x1a, 0x22, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76,
-	0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x42, 0x4f, 0x4d, 0x52, 0x65, 0x73, 0x70,
-	0x6f, 0x6e, 0x73, 0x65, 0x12, 0x6b, 0x0a, 0x12, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x42, 0x75,
-	0x69, 0x6c, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x12, 0x29, 0x2e, 0x64, 0x65, 0x70,
+	0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0xf2, 0x02, 0x0a, 0x19, 0x52, 0x65,
+	0x70, 0x6f, 0x72, 0x74, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x49, 0x74, 0x65, 0x6d, 0x73,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x1b, 0x0a, 0x09, 0x73, 0x70, 0x69, 0x66, 0x66,
+	0x65, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x08, 0x73, 0x70, 0x69, 0x66,
+	0x66, 0x65, 0x49, 0x64, 0x12, 0x44, 0x0a, 0x05, 0x69, 0x74, 0x65, 0x6d, 0x73, 0x18, 0x02, 0x20,
+	0x03, 0x28, 0x0b, 0x32, 0x2e, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75,
+	0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x6f, 0x6e, 0x74, 0x65,
+	0x78, 0x74, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x2e, 0x49,
+	0x74, 0x65, 0x6d, 0x52, 0x05, 0x69, 0x74, 0x65, 0x6d, 0x73, 0x1a, 0x9e, 0x01, 0x0a, 0x04, 0x49,
+	0x74, 0x65, 0x6d, 0x12, 0x12, 0x0a, 0x04, 0x70, 0x61, 0x74, 0x68, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x04, 0x70, 0x61, 0x74, 0x68, 0x12, 0x42, 0x0a, 0x04, 0x74, 0x79, 0x70, 0x65, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x2e, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c,
+	0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x6f, 0x6e,
+	0x74, 0x65, 0x78, 0x74, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x2e, 0x54, 0x79, 0x70, 0x65, 0x52, 0x04, 0x74, 0x79, 0x70, 0x65, 0x12, 0x1d, 0x0a, 0x0a, 0x73,
+	0x69, 0x7a, 0x65, 0x5f, 0x62, 0x79, 0x74, 0x65, 0x73, 0x18, 0x03, 0x20, 0x01, 0x28, 0x03, 0x52,
+	0x09, 0x73, 0x69, 0x7a, 0x65, 0x42, 0x79, 0x74, 0x65, 0x73, 0x12, 0x1f, 0x0a, 0x0b, 0x64, 0x75,
+	0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x6d, 0x73, 0x18, 0x04, 0x20, 0x01, 0x28, 0x05, 0x52,
+	0x0a, 0x64, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x4d, 0x73, 0x22, 0x51, 0x0a, 0x04, 0x54,
+	0x79, 0x70, 0x65, 0x12, 0x14, 0x0a, 0x10, 0x54, 0x59, 0x50, 0x45, 0x5f, 0x55, 0x4e, 0x53, 0x50,
+	0x45, 0x43, 0x49, 0x46, 0x49, 0x45, 0x44, 0x10, 0x00, 0x12, 0x0d, 0x0a, 0x09, 0x54, 0x59, 0x50,
+	0x45, 0x5f, 0x46, 0x49, 0x4c, 0x45, 0x10, 0x01, 0x12, 0x12, 0x0a, 0x0e, 0x54, 0x59, 0x50, 0x45,
+	0x5f, 0x44, 0x49, 0x52, 0x45, 0x43, 0x54, 0x4f, 0x52, 0x59, 0x10, 0x02, 0x12, 0x10, 0x0a, 0x0c,
+	0x54, 0x59, 0x50, 0x45, 0x5f, 0x53, 0x59, 0x4d, 0x4c, 0x49, 0x4e, 0x4b, 0x10, 0x03, 0x22, 0x1c,
+	0x0a, 0x1a, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x49,
+	0x74, 0x65, 0x6d, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x32, 0xb2, 0x05, 0x0a,
+	0x0e, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x65, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63, 0x65, 0x12,
+	0x64, 0x0a, 0x0f, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x4d, 0x61, 0x63, 0x68, 0x69,
+	0x6e, 0x65, 0x12, 0x26, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64,
+	0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x4d, 0x61, 0x63, 0x68,
+	0x69, 0x6e, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x64, 0x65, 0x70,
+	0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x67, 0x69,
+	0x73, 0x74, 0x65, 0x72, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f,
+	0x6e, 0x73, 0x65, 0x30, 0x01, 0x12, 0x68, 0x0a, 0x11, 0x50, 0x69, 0x6e, 0x67, 0x4d, 0x61, 0x63,
+	0x68, 0x69, 0x6e, 0x65, 0x48, 0x65, 0x61, 0x6c, 0x74, 0x68, 0x12, 0x28, 0x2e, 0x64, 0x65, 0x70,
+	0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x50, 0x69, 0x6e, 0x67,
+	0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e, 0x65, 0x48, 0x65, 0x61, 0x6c, 0x74, 0x68, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x1a, 0x29, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f,
+	0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x50, 0x69, 0x6e, 0x67, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e,
+	0x65, 0x48, 0x65, 0x61, 0x6c, 0x74, 0x68, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
+	0x44, 0x0a, 0x05, 0x55, 0x73, 0x61, 0x67, 0x65, 0x12, 0x1c, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74,
+	0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x55, 0x73, 0x61, 0x67, 0x65, 0x52,
+	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1d, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63,
+	0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x55, 0x73, 0x61, 0x67, 0x65, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x5b, 0x0a, 0x0c, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53,
+	0x74, 0x61, 0x74, 0x75, 0x73, 0x12, 0x23, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c,
+	0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x74, 0x61,
+	0x74, 0x75, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x24, 0x2e, 0x64, 0x65, 0x70,
 	0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f,
-	0x72, 0x74, 0x42, 0x75, 0x69, 0x6c, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x52, 0x65,
+	0x72, 0x74, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65,
+	0x28, 0x01, 0x12, 0x53, 0x0a, 0x0a, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x42, 0x4f, 0x4d,
+	0x12, 0x21, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76,
+	0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x42, 0x4f, 0x4d, 0x52, 0x65, 0x71, 0x75,
+	0x65, 0x73, 0x74, 0x1a, 0x22, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75,
+	0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x53, 0x42, 0x4f, 0x4d, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x6b, 0x0a, 0x12, 0x52, 0x65, 0x70, 0x6f, 0x72,
+	0x74, 0x42, 0x75, 0x69, 0x6c, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x12, 0x29, 0x2e,
+	0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52,
+	0x65, 0x70, 0x6f, 0x72, 0x74, 0x42, 0x75, 0x69, 0x6c, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78,
+	0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74,
+	0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74,
+	0x42, 0x75, 0x69, 0x6c, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x12, 0x6b, 0x0a, 0x12, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x6f,
+	0x6e, 0x74, 0x65, 0x78, 0x74, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x12, 0x29, 0x2e, 0x64, 0x65, 0x70,
+	0x6f, 0x74, 0x2e, 0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f,
+	0x72, 0x74, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x52, 0x65,
 	0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e, 0x63, 0x6c,
-	0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x42, 0x75, 0x69,
-	0x6c, 0x64, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x78, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x2e, 0x52, 0x65, 0x70, 0x6f, 0x72, 0x74, 0x43, 0x6f, 0x6e,
+	0x74, 0x65, 0x78, 0x74, 0x49, 0x74, 0x65, 0x6d, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
 	0x65, 0x42, 0xa8, 0x01, 0x0a, 0x12, 0x63, 0x6f, 0x6d, 0x2e, 0x64, 0x65, 0x70, 0x6f, 0x74, 0x2e,
 	0x63, 0x6c, 0x6f, 0x75, 0x64, 0x2e, 0x76, 0x33, 0x42, 0x0c, 0x4d, 0x61, 0x63, 0x68, 0x69, 0x6e,
 	0x65, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x50, 0x01, 0x5a, 0x2a, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62,
@@ -1877,71 +2125,79 @@ func file_machine_proto_rawDescGZIP() []byte {
 	return file_machine_proto_rawDescData
 }
 
-var file_machine_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_machine_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_machine_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_machine_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_machine_proto_goTypes = []interface{}{
 	(RegisterMachineResponse_Mount_FilesystemType)(0), // 0: depot.cloud.v3.RegisterMachineResponse.Mount.FilesystemType
-	(*RegisterMachineRequest)(nil),                    // 1: depot.cloud.v3.RegisterMachineRequest
-	(*RegisterMachineResponse)(nil),                   // 2: depot.cloud.v3.RegisterMachineResponse
-	(*PingMachineHealthRequest)(nil),                  // 3: depot.cloud.v3.PingMachineHealthRequest
-	(*DiskSpace)(nil),                                 // 4: depot.cloud.v3.DiskSpace
-	(*PingMachineHealthResponse)(nil),                 // 5: depot.cloud.v3.PingMachineHealthResponse
-	(*Cert)(nil),                                      // 6: depot.cloud.v3.Cert
-	(*UsageRequest)(nil),                              // 7: depot.cloud.v3.UsageRequest
-	(*Cache)(nil),                                     // 8: depot.cloud.v3.Cache
-	(*UsageResponse)(nil),                             // 9: depot.cloud.v3.UsageResponse
-	(*ReportStatusRequest)(nil),                       // 10: depot.cloud.v3.ReportStatusRequest
-	(*ReportStatusResponse)(nil),                      // 11: depot.cloud.v3.ReportStatusResponse
-	(*ReportSBOMRequest)(nil),                         // 12: depot.cloud.v3.ReportSBOMRequest
-	(*SBOM)(nil),                                      // 13: depot.cloud.v3.SBOM
-	(*Image)(nil),                                     // 14: depot.cloud.v3.Image
-	(*ReportSBOMResponse)(nil),                        // 15: depot.cloud.v3.ReportSBOMResponse
-	(*ReportBuildContextRequest)(nil),                 // 16: depot.cloud.v3.ReportBuildContextRequest
-	(*Dockerfile)(nil),                                // 17: depot.cloud.v3.Dockerfile
-	(*ReportBuildContextResponse)(nil),                // 18: depot.cloud.v3.ReportBuildContextResponse
-	(*RegisterMachineRequest_AWSRegistration)(nil),    // 19: depot.cloud.v3.RegisterMachineRequest.AWSRegistration
-	(*RegisterMachineResponse_Mount)(nil),             // 20: depot.cloud.v3.RegisterMachineResponse.Mount
-	(*RegisterMachineResponse_PendingTask)(nil),       // 21: depot.cloud.v3.RegisterMachineResponse.PendingTask
-	(*RegisterMachineResponse_BuildKitTask)(nil),      // 22: depot.cloud.v3.RegisterMachineResponse.BuildKitTask
-	(*RegisterMachineResponse_Profiler)(nil),          // 23: depot.cloud.v3.RegisterMachineResponse.Profiler
-	(*RegisterMachineResponse_Mount_CephVolume)(nil),  // 24: depot.cloud.v3.RegisterMachineResponse.Mount.CephVolume
-	nil,                            // 25: depot.cloud.v3.ReportStatusRequest.StableDigestsEntry
-	(*control.StatusResponse)(nil), // 26: moby.buildkit.v1.StatusResponse
+	(ReportContextItemsRequest_Type)(0),               // 1: depot.cloud.v3.ReportContextItemsRequest.Type
+	(*RegisterMachineRequest)(nil),                    // 2: depot.cloud.v3.RegisterMachineRequest
+	(*RegisterMachineResponse)(nil),                   // 3: depot.cloud.v3.RegisterMachineResponse
+	(*PingMachineHealthRequest)(nil),                  // 4: depot.cloud.v3.PingMachineHealthRequest
+	(*DiskSpace)(nil),                                 // 5: depot.cloud.v3.DiskSpace
+	(*PingMachineHealthResponse)(nil),                 // 6: depot.cloud.v3.PingMachineHealthResponse
+	(*Cert)(nil),                                      // 7: depot.cloud.v3.Cert
+	(*UsageRequest)(nil),                              // 8: depot.cloud.v3.UsageRequest
+	(*Cache)(nil),                                     // 9: depot.cloud.v3.Cache
+	(*UsageResponse)(nil),                             // 10: depot.cloud.v3.UsageResponse
+	(*ReportStatusRequest)(nil),                       // 11: depot.cloud.v3.ReportStatusRequest
+	(*ReportStatusResponse)(nil),                      // 12: depot.cloud.v3.ReportStatusResponse
+	(*ReportSBOMRequest)(nil),                         // 13: depot.cloud.v3.ReportSBOMRequest
+	(*SBOM)(nil),                                      // 14: depot.cloud.v3.SBOM
+	(*Image)(nil),                                     // 15: depot.cloud.v3.Image
+	(*ReportSBOMResponse)(nil),                        // 16: depot.cloud.v3.ReportSBOMResponse
+	(*ReportBuildContextRequest)(nil),                 // 17: depot.cloud.v3.ReportBuildContextRequest
+	(*Dockerfile)(nil),                                // 18: depot.cloud.v3.Dockerfile
+	(*ReportBuildContextResponse)(nil),                // 19: depot.cloud.v3.ReportBuildContextResponse
+	(*ReportContextItemsRequest)(nil),                 // 20: depot.cloud.v3.ReportContextItemsRequest
+	(*ReportContextItemsResponse)(nil),                // 21: depot.cloud.v3.ReportContextItemsResponse
+	(*RegisterMachineRequest_AWSRegistration)(nil),    // 22: depot.cloud.v3.RegisterMachineRequest.AWSRegistration
+	(*RegisterMachineResponse_Mount)(nil),             // 23: depot.cloud.v3.RegisterMachineResponse.Mount
+	(*RegisterMachineResponse_PendingTask)(nil),       // 24: depot.cloud.v3.RegisterMachineResponse.PendingTask
+	(*RegisterMachineResponse_BuildKitTask)(nil),      // 25: depot.cloud.v3.RegisterMachineResponse.BuildKitTask
+	(*RegisterMachineResponse_Profiler)(nil),          // 26: depot.cloud.v3.RegisterMachineResponse.Profiler
+	(*RegisterMachineResponse_Mount_CephVolume)(nil),  // 27: depot.cloud.v3.RegisterMachineResponse.Mount.CephVolume
+	nil,                                    // 28: depot.cloud.v3.ReportStatusRequest.StableDigestsEntry
+	(*ReportContextItemsRequest_Item)(nil), // 29: depot.cloud.v3.ReportContextItemsRequest.Item
+	(*control.StatusResponse)(nil),         // 30: moby.buildkit.v1.StatusResponse
 }
 var file_machine_proto_depIdxs = []int32{
-	19, // 0: depot.cloud.v3.RegisterMachineRequest.aws:type_name -> depot.cloud.v3.RegisterMachineRequest.AWSRegistration
-	21, // 1: depot.cloud.v3.RegisterMachineResponse.pending:type_name -> depot.cloud.v3.RegisterMachineResponse.PendingTask
-	22, // 2: depot.cloud.v3.RegisterMachineResponse.buildkit:type_name -> depot.cloud.v3.RegisterMachineResponse.BuildKitTask
-	4,  // 3: depot.cloud.v3.PingMachineHealthRequest.disks:type_name -> depot.cloud.v3.DiskSpace
-	8,  // 4: depot.cloud.v3.UsageRequest.cache:type_name -> depot.cloud.v3.Cache
-	26, // 5: depot.cloud.v3.ReportStatusRequest.status:type_name -> moby.buildkit.v1.StatusResponse
-	25, // 6: depot.cloud.v3.ReportStatusRequest.stable_digests:type_name -> depot.cloud.v3.ReportStatusRequest.StableDigestsEntry
-	13, // 7: depot.cloud.v3.ReportSBOMRequest.sboms:type_name -> depot.cloud.v3.SBOM
-	14, // 8: depot.cloud.v3.SBOM.image:type_name -> depot.cloud.v3.Image
-	17, // 9: depot.cloud.v3.ReportBuildContextRequest.dockerfile:type_name -> depot.cloud.v3.Dockerfile
-	0,  // 10: depot.cloud.v3.RegisterMachineResponse.Mount.fs_type:type_name -> depot.cloud.v3.RegisterMachineResponse.Mount.FilesystemType
-	24, // 11: depot.cloud.v3.RegisterMachineResponse.Mount.ceph_volume:type_name -> depot.cloud.v3.RegisterMachineResponse.Mount.CephVolume
-	6,  // 12: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.cert:type_name -> depot.cloud.v3.Cert
-	6,  // 13: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.ca_cert:type_name -> depot.cloud.v3.Cert
-	20, // 14: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.mounts:type_name -> depot.cloud.v3.RegisterMachineResponse.Mount
-	23, // 15: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.profiler:type_name -> depot.cloud.v3.RegisterMachineResponse.Profiler
-	1,  // 16: depot.cloud.v3.MachineService.RegisterMachine:input_type -> depot.cloud.v3.RegisterMachineRequest
-	3,  // 17: depot.cloud.v3.MachineService.PingMachineHealth:input_type -> depot.cloud.v3.PingMachineHealthRequest
-	7,  // 18: depot.cloud.v3.MachineService.Usage:input_type -> depot.cloud.v3.UsageRequest
-	10, // 19: depot.cloud.v3.MachineService.ReportStatus:input_type -> depot.cloud.v3.ReportStatusRequest
-	12, // 20: depot.cloud.v3.MachineService.ReportSBOM:input_type -> depot.cloud.v3.ReportSBOMRequest
-	16, // 21: depot.cloud.v3.MachineService.ReportBuildContext:input_type -> depot.cloud.v3.ReportBuildContextRequest
-	2,  // 22: depot.cloud.v3.MachineService.RegisterMachine:output_type -> depot.cloud.v3.RegisterMachineResponse
-	5,  // 23: depot.cloud.v3.MachineService.PingMachineHealth:output_type -> depot.cloud.v3.PingMachineHealthResponse
-	9,  // 24: depot.cloud.v3.MachineService.Usage:output_type -> depot.cloud.v3.UsageResponse
-	11, // 25: depot.cloud.v3.MachineService.ReportStatus:output_type -> depot.cloud.v3.ReportStatusResponse
-	15, // 26: depot.cloud.v3.MachineService.ReportSBOM:output_type -> depot.cloud.v3.ReportSBOMResponse
-	18, // 27: depot.cloud.v3.MachineService.ReportBuildContext:output_type -> depot.cloud.v3.ReportBuildContextResponse
-	22, // [22:28] is the sub-list for method output_type
-	16, // [16:22] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	22, // 0: depot.cloud.v3.RegisterMachineRequest.aws:type_name -> depot.cloud.v3.RegisterMachineRequest.AWSRegistration
+	24, // 1: depot.cloud.v3.RegisterMachineResponse.pending:type_name -> depot.cloud.v3.RegisterMachineResponse.PendingTask
+	25, // 2: depot.cloud.v3.RegisterMachineResponse.buildkit:type_name -> depot.cloud.v3.RegisterMachineResponse.BuildKitTask
+	5,  // 3: depot.cloud.v3.PingMachineHealthRequest.disks:type_name -> depot.cloud.v3.DiskSpace
+	9,  // 4: depot.cloud.v3.UsageRequest.cache:type_name -> depot.cloud.v3.Cache
+	30, // 5: depot.cloud.v3.ReportStatusRequest.status:type_name -> moby.buildkit.v1.StatusResponse
+	28, // 6: depot.cloud.v3.ReportStatusRequest.stable_digests:type_name -> depot.cloud.v3.ReportStatusRequest.StableDigestsEntry
+	14, // 7: depot.cloud.v3.ReportSBOMRequest.sboms:type_name -> depot.cloud.v3.SBOM
+	15, // 8: depot.cloud.v3.SBOM.image:type_name -> depot.cloud.v3.Image
+	18, // 9: depot.cloud.v3.ReportBuildContextRequest.dockerfile:type_name -> depot.cloud.v3.Dockerfile
+	29, // 10: depot.cloud.v3.ReportContextItemsRequest.items:type_name -> depot.cloud.v3.ReportContextItemsRequest.Item
+	0,  // 11: depot.cloud.v3.RegisterMachineResponse.Mount.fs_type:type_name -> depot.cloud.v3.RegisterMachineResponse.Mount.FilesystemType
+	27, // 12: depot.cloud.v3.RegisterMachineResponse.Mount.ceph_volume:type_name -> depot.cloud.v3.RegisterMachineResponse.Mount.CephVolume
+	7,  // 13: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.cert:type_name -> depot.cloud.v3.Cert
+	7,  // 14: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.ca_cert:type_name -> depot.cloud.v3.Cert
+	23, // 15: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.mounts:type_name -> depot.cloud.v3.RegisterMachineResponse.Mount
+	26, // 16: depot.cloud.v3.RegisterMachineResponse.BuildKitTask.profiler:type_name -> depot.cloud.v3.RegisterMachineResponse.Profiler
+	1,  // 17: depot.cloud.v3.ReportContextItemsRequest.Item.type:type_name -> depot.cloud.v3.ReportContextItemsRequest.Type
+	2,  // 18: depot.cloud.v3.MachineService.RegisterMachine:input_type -> depot.cloud.v3.RegisterMachineRequest
+	4,  // 19: depot.cloud.v3.MachineService.PingMachineHealth:input_type -> depot.cloud.v3.PingMachineHealthRequest
+	8,  // 20: depot.cloud.v3.MachineService.Usage:input_type -> depot.cloud.v3.UsageRequest
+	11, // 21: depot.cloud.v3.MachineService.ReportStatus:input_type -> depot.cloud.v3.ReportStatusRequest
+	13, // 22: depot.cloud.v3.MachineService.ReportSBOM:input_type -> depot.cloud.v3.ReportSBOMRequest
+	17, // 23: depot.cloud.v3.MachineService.ReportBuildContext:input_type -> depot.cloud.v3.ReportBuildContextRequest
+	20, // 24: depot.cloud.v3.MachineService.ReportContextItems:input_type -> depot.cloud.v3.ReportContextItemsRequest
+	3,  // 25: depot.cloud.v3.MachineService.RegisterMachine:output_type -> depot.cloud.v3.RegisterMachineResponse
+	6,  // 26: depot.cloud.v3.MachineService.PingMachineHealth:output_type -> depot.cloud.v3.PingMachineHealthResponse
+	10, // 27: depot.cloud.v3.MachineService.Usage:output_type -> depot.cloud.v3.UsageResponse
+	12, // 28: depot.cloud.v3.MachineService.ReportStatus:output_type -> depot.cloud.v3.ReportStatusResponse
+	16, // 29: depot.cloud.v3.MachineService.ReportSBOM:output_type -> depot.cloud.v3.ReportSBOMResponse
+	19, // 30: depot.cloud.v3.MachineService.ReportBuildContext:output_type -> depot.cloud.v3.ReportBuildContextResponse
+	21, // 31: depot.cloud.v3.MachineService.ReportContextItems:output_type -> depot.cloud.v3.ReportContextItemsResponse
+	25, // [25:32] is the sub-list for method output_type
+	18, // [18:25] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_machine_proto_init() }
@@ -2167,7 +2423,7 @@ func file_machine_proto_init() {
 			}
 		}
 		file_machine_proto_msgTypes[18].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RegisterMachineRequest_AWSRegistration); i {
+			switch v := v.(*ReportContextItemsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2179,7 +2435,7 @@ func file_machine_proto_init() {
 			}
 		}
 		file_machine_proto_msgTypes[19].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RegisterMachineResponse_Mount); i {
+			switch v := v.(*ReportContextItemsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2191,7 +2447,7 @@ func file_machine_proto_init() {
 			}
 		}
 		file_machine_proto_msgTypes[20].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RegisterMachineResponse_PendingTask); i {
+			switch v := v.(*RegisterMachineRequest_AWSRegistration); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2203,7 +2459,7 @@ func file_machine_proto_init() {
 			}
 		}
 		file_machine_proto_msgTypes[21].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RegisterMachineResponse_BuildKitTask); i {
+			switch v := v.(*RegisterMachineResponse_Mount); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2215,7 +2471,7 @@ func file_machine_proto_init() {
 			}
 		}
 		file_machine_proto_msgTypes[22].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*RegisterMachineResponse_Profiler); i {
+			switch v := v.(*RegisterMachineResponse_PendingTask); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2227,7 +2483,43 @@ func file_machine_proto_init() {
 			}
 		}
 		file_machine_proto_msgTypes[23].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RegisterMachineResponse_BuildKitTask); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_machine_proto_msgTypes[24].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*RegisterMachineResponse_Profiler); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_machine_proto_msgTypes[25].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*RegisterMachineResponse_Mount_CephVolume); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_machine_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*ReportContextItemsRequest_Item); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2247,15 +2539,15 @@ func file_machine_proto_init() {
 		(*RegisterMachineResponse_Buildkit)(nil),
 	}
 	file_machine_proto_msgTypes[12].OneofWrappers = []interface{}{}
-	file_machine_proto_msgTypes[19].OneofWrappers = []interface{}{}
 	file_machine_proto_msgTypes[21].OneofWrappers = []interface{}{}
+	file_machine_proto_msgTypes[23].OneofWrappers = []interface{}{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_machine_proto_rawDesc,
-			NumEnums:      1,
-			NumMessages:   25,
+			NumEnums:      2,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

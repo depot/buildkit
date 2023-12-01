@@ -492,6 +492,7 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 	}
 	procs = append(procs, copyMetadata)
 
+	ctx = depot.WithSpiffe(ctx, spiffeID)
 	resp, sboms, err := c.solver.Solve(ctx, req.Ref, req.Session, frontend.SolveRequest{
 		Frontend:       req.Frontend,
 		Definition:     req.Definition,

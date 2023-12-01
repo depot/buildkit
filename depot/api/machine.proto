@@ -11,6 +11,7 @@ service MachineService {
   rpc ReportStatus(stream ReportStatusRequest) returns (ReportStatusResponse);
   rpc ReportSBOM(ReportSBOMRequest) returns (ReportSBOMResponse);
   rpc ReportBuildContext(ReportBuildContextRequest) returns (ReportBuildContextResponse);
+  rpc ReportContextItems(ReportContextItemsRequest) returns (ReportContextItemsResponse);
 }
 
 message RegisterMachineRequest {
@@ -172,3 +173,24 @@ message Dockerfile {
 }
 
 message ReportBuildContextResponse {}
+
+message ReportContextItemsRequest {
+  string spiffe_id = 1;
+  repeated Item items = 2;
+
+  message Item {
+    string path = 1;
+    Type type = 2;
+    int64 size_bytes = 3;
+    int32 duration_ms = 4;
+  }
+
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_FILE = 1;
+    TYPE_DIRECTORY = 2;
+    TYPE_SYMLINK = 3;
+  }
+}
+
+message ReportContextItemsResponse {}

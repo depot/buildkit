@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/moby/buildkit/depot"
@@ -46,13 +47,16 @@ func (ls *localSource) ID() string {
 	return srctypes.LocalScheme
 }
 
-func (ls *localSource) Resolve(ctx context.Context, id source.Identifier, sm *session.Manager, _ solver.Vertex) (source.SourceInstance, error) {
+// DEPOT: we pass the vertex to the handler so we can access the SPIFFE id.
+func (ls *localSource) Resolve(ctx context.Context, id source.Identifier, sm *session.Manager, vtx solver.Vertex) (source.SourceInstance, error) {
 	localIdentifier, ok := id.(*source.LocalIdentifier)
 	if !ok {
 		return nil, errors.Errorf("invalid local identifier %v", id)
 	}
 
 	return &localSourceHandler{
+		// DEPOT: we pass the vertex to the handler so we can access the SPIFFE id.
+		vtx:         vtx,
 		src:         *localIdentifier,
 		sm:          sm,
 		localSource: ls,
@@ -60,6 +64,8 @@ func (ls *localSource) Resolve(ctx context.Context, id source.Identifier, sm *se
 }
 
 type localSourceHandler struct {
+	// DEPOT: we pass the vertex to the handler so we can access the SPIFFE id within its description.
+	vtx solver.Vertex
 	src source.LocalIdentifier
 	sm  *session.Manager
 	*localSource
@@ -201,12 +207,16 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 	}
 
 	var updater filesync.CacheUpdater = &cacheUpdater{cc, mount.IdentityMapping()}
-	// DEPOT: capture the context sync changes.
-	if ls.src.Name == "context" && depot.ContextLogFeatureEnabled() {
-		pw, _, _ := progress.NewFromContext(ctx)
-		defer func() { _ = pw.Close() }()
-
-		updater = depot.NewContextLog(updater, pw)
+	// DEPOT: capture the context sync changes (skipping .dockerignore is a minor optimization).
+	isNotDockerignore := !strings.Contains(ls.src.SharedKeyHint, ".dockerignore")
+	if ls.src.Name == "context" && isNotDockerignore && depot.ContextLogFeatureEnabled() {
+		spiffe := depot.SpiffeFromVertex(ls.vtx)
+		if spiffe != "" {
+			log := depot.NewContextLog(ctx, spiffe, updater)
+			// DEPOT: We put the defer into a background go routine as to not block the build.
+			defer func() { go func() { _ = log.Close() }() }()
+			updater = log
+		}
 	}
 
 	opt := filesync.FSSendRequestOpt{

@@ -441,6 +441,9 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// DEPOT: we are plumbing the spiffe id all the way to the local source op.
+	depot.JobSetValueWithSpiffe(j, depot.SpiffeFrom(ctx))
 	j.SetValue(keyEntitlements, set)
 
 	if srcPol != nil {

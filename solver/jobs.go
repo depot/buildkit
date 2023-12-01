@@ -1015,6 +1015,11 @@ func (v *vertexWithCacheOptions) Inputs() []Edge {
 	return v.inputs
 }
 
+// DEPOT: conform to our interface addition allowing us to pass through the SPIFFE id.
+func (v *vertexWithCacheOptions) Description() map[string]string {
+	return v.Vertex.Options().Description
+}
+
 func notifyStarted(ctx context.Context, v *client.Vertex, cached bool) func(err error, cached bool) {
 	pw, _, _ := progress.NewFromContext(ctx)
 	start := time.Now()

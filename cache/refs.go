@@ -40,6 +40,19 @@ import (
 
 var additionalAnnotations = append(compression.EStargzAnnotations, containerdUncompressed)
 
+func init() {
+	additionalAnnotations = append(additionalAnnotations, overlaybdAnnotations...)
+}
+
+const (
+	LabelLocalOverlayBDPath     = "containerd.io/snapshot/overlaybd.localcommitpath"
+	labelKeyOverlayBDBlobDigest = "containerd.io/snapshot/overlaybd/blob-digest"
+	labelKeyOverlayBDBlobSize   = "containerd.io/snapshot/overlaybd/blob-size"
+	labelKeyOverlayBDBlobFsType = "containerd.io/snapshot/overlaybd/blob-fs-type"
+)
+
+var overlaybdAnnotations = []string{labelKeyOverlayBDBlobFsType, labelKeyOverlayBDBlobSize, labelKeyOverlayBDBlobDigest}
+
 // Ref is a reference to cacheable objects.
 type Ref interface {
 	Mountable
@@ -962,6 +975,10 @@ func (sr *immutableRef) Extract(ctx context.Context, s session.Group) (rerr erro
 			return err
 		}
 		return rerr
+	} else if sr.cm.Snapshotter.Name() == "overlaybd" {
+		if rerr = sr.prepareRemoteSnapshotsOverlaybdMode(ctx, s); rerr == nil {
+			return nil
+		}
 	}
 
 	return sr.unlazy(ctx, sr.descHandlers, sr.progress, s, true)
@@ -1065,6 +1082,60 @@ func (sr *immutableRef) prepareRemoteSnapshotsStargzMode(ctx context.Context, s 
 							}
 						}()
 
+						// Try the next layer as well.
+						continue
+					}
+				}
+			}
+
+			// This layer and all upper layers cannot be prepared without unlazying.
+			break
+		}
+
+		return nil, nil
+	})
+	return err
+}
+
+func (sr *immutableRef) prepareRemoteSnapshotsOverlaybdMode(ctx context.Context, s session.Group) error {
+	_, err := sr.sizeG.Do(ctx, sr.ID()+"-prepare-remote-snapshot", func(ctx context.Context) (_ interface{}, rerr error) {
+		dhs := sr.descHandlers
+		for _, r := range sr.layerChain() {
+			r := r
+			snapshotID := r.getSnapshotID()
+			if _, err := r.cm.Snapshotter.Stat(ctx, snapshotID); err == nil {
+				continue
+			}
+
+			dh := dhs[digest.Digest(r.getBlob())]
+			if dh == nil {
+				// We cannot prepare remote snapshots without descHandler.
+				return nil, nil
+			}
+
+			defaultLabels := snapshots.FilterInheritedLabels(dh.SnapshotLabels)
+			if defaultLabels == nil {
+				defaultLabels = make(map[string]string)
+			}
+			defaultLabels["containerd.io/snapshot.ref"] = snapshotID
+
+			// Prepare remote snapshots
+			var (
+				key  = fmt.Sprintf("tmp-%s %s", identity.NewID(), r.getChainID())
+				opts = []snapshots.Opt{
+					snapshots.WithLabels(defaultLabels),
+				}
+			)
+			parentID := ""
+			if r.layerParent != nil {
+				parentID = r.layerParent.getSnapshotID()
+			}
+			if err := r.cm.Snapshotter.Prepare(ctx, key, parentID, opts...); err != nil {
+				if errdefs.IsAlreadyExists(err) {
+					// Check if the targeting snapshot ID has been prepared as
+					// a remote snapshot in the snapshotter.
+					_, err := r.cm.Snapshotter.Stat(ctx, snapshotID)
+					if err == nil { // usable as remote snapshot without unlazying.
 						// Try the next layer as well.
 						continue
 					}

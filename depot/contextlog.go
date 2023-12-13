@@ -46,7 +46,8 @@ type ContextLog struct {
 	finishCh chan *Log
 	sendCh   chan *ProcessedLog
 
-	wg sync.WaitGroup
+	closed chan struct{}
+	wg     sync.WaitGroup
 }
 
 type Log struct {
@@ -73,6 +74,7 @@ func NewContextLog(ctx context.Context, spiffe string, inner filesync.CacheUpdat
 		startCh:  make(chan *Log, 1024),
 		finishCh: make(chan *Log, 1024),
 		sendCh:   make(chan *ProcessedLog, 1024),
+		closed:   make(chan struct{}),
 	}
 
 	log.wg.Add(2)
@@ -81,11 +83,27 @@ func NewContextLog(ctx context.Context, spiffe string, inner filesync.CacheUpdat
 	return log
 }
 
+// Close stops the background processes by signaling the `Process` go routine to stop via
+// closing the `closed` channel. This in turn closes the `sendCh` channel which signals the
+// `Send` go routine to stop.
+//
+// This elaborate shutdown procedure is required as `ContentHasher` and `HandleChange`
+// may be called in a racy by by fsutil despite the context being canceled.
+func (c *ContextLog) Close() error {
+	close(c.closed)
+	c.wg.Wait()
+	return nil
+}
+
 func (c *ContextLog) MarkSupported(s bool) { c.inner.MarkSupported(s) }
 
 // ContentHasher is wrapped in order to record the start time of the transfer.
 // The fsutil package seems to call this function once per file that has been
 // modified or added.
+//
+// There is no way to know when fsutil has finished calling ContentHasher nor HandleChange.
+// As a result, we skip sending data to the startCh channel if the ContextLog has been `Close`d.
+// This may mean that some data is not recorded as a result of fsutil's racy behavior.
 func (c *ContextLog) ContentHasher() fsutil.ContentHasher {
 	return func(stat *fstypes.Stat) (hash.Hash, error) {
 		hash, err := c.inner.ContentHasher()(stat)
@@ -94,7 +112,10 @@ func (c *ContextLog) ContentHasher() fsutil.ContentHasher {
 		}
 
 		if stat != nil {
-			c.startCh <- &Log{Path: stat.Path, At: time.Now(), Size: stat.Size_}
+			select {
+			case <-c.closed:
+			case c.startCh <- &Log{Path: stat.Path, At: time.Now(), Size: stat.Size_}:
+			}
 		}
 
 		return hash, nil
@@ -103,6 +124,10 @@ func (c *ContextLog) ContentHasher() fsutil.ContentHasher {
 
 // HandleChange wraps the inner HandleChange function in order to record the
 // end time of the build context file transfer.
+//
+// There is no way to know when fsutil has finished calling ContentHasher nor HandleChange.
+// As a result, we skip sending data to the startCh channel if the ContextLog has been `Close`d.
+// This may mean that some data is not recorded as a result of fsutil's racy behavior.
 func (c *ContextLog) HandleChange(kind fsutil.ChangeKind, path string, stat os.FileInfo, statErr error) error {
 	err := c.inner.HandleChange(kind, path, stat, statErr)
 	if err != nil {
@@ -120,11 +145,17 @@ func (c *ContextLog) HandleChange(kind fsutil.ChangeKind, path string, stat os.F
 		return nil
 	}
 
-	c.finishCh <- &Log{Path: path, At: time.Now(), Size: stat.Size(), Mode: stat.Mode()}
+	select {
+	case <-c.closed:
+	case c.finishCh <- &Log{Path: path, At: time.Now(), Size: stat.Size(), Mode: stat.Mode()}:
+	}
 
 	return nil
 }
 
+// Process is a background process to record the start and finish times of the build context file transfers.
+// If context is canceled or the ContextLog is `Close`d, this will close the sendCh channel. This in turn
+// will stop the Send goroutine.
 func (c *ContextLog) Process(ctx context.Context) {
 	logs := map[string]*ProcessedLog{}
 	// Closing the send channel signals the the Send goroutine to finish.
@@ -135,35 +166,24 @@ func (c *ContextLog) Process(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case log, ok := <-c.startCh:
-			if !ok {
-				c.startCh = nil // nil channels are never selected.
-			} else {
-				logs[log.Path] = &ProcessedLog{Path: log.Path, Size: log.Size, StartedAt: log.At}
+		case <-c.closed:
+			return
+		case log := <-c.startCh:
+			logs[log.Path] = &ProcessedLog{Path: log.Path, Size: log.Size, StartedAt: log.At}
+		case log := <-c.finishCh:
+			l, ok := logs[log.Path]
+			if ok {
+				l.FinishedAt = log.At
+				l.Mode = log.Mode
+				c.sendCh <- l
+				delete(logs, log.Path)
 			}
-		case log, ok := <-c.finishCh:
-			if !ok {
-				c.finishCh = nil // nil channels are never selected.
-			} else {
-				l, ok := logs[log.Path]
-				if ok {
-					l.FinishedAt = log.At
-					l.Mode = log.Mode
-					c.sendCh <- l
-					delete(logs, log.Path)
-				}
-			}
-		}
-
-		// Now that both channels have been closed and remaining logs flushed to send, we can stop.
-		if c.startCh == nil && c.finishCh == nil {
-			break
 		}
 	}
 }
 
 // Send is a background process to send the batches of context logs to the API.
-// Cancel this by closing the sendCh channel.
+// Cancel this by closing the sendCh channel via `Close`.
 func (c *ContextLog) Send(spiffe string) {
 	// Buffer 1 second before sending build timings to the server
 	const (
@@ -222,13 +242,6 @@ func (c *ContextLog) Send(spiffe string) {
 			}
 		}
 	}
-}
-
-func (c *ContextLog) Close() error {
-	close(c.startCh)
-	close(c.finishCh)
-	c.wg.Wait()
-	return nil
 }
 
 func SendContext(ctx context.Context, client cloudv3connect.MachineServiceClient, bearer, spiffe string, logs []*ProcessedLog) error {

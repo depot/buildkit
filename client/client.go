@@ -86,6 +86,12 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		if sd, ok := o.(*withSessionDialer); ok {
 			sessionDialer = sd.dialer
 		}
+
+		// DEPOT: Allow any grpc.DialOption to be passed through.
+		// This is useful for setting gzip, for example.
+		if opt, ok := o.(grpc.DialOption); ok {
+			gopts = append(gopts, opt)
+		}
 	}
 
 	if !customTracer {

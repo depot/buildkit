@@ -16,7 +16,7 @@ func depotReportMergedEdges(e *edge) {
 			writer := op.st.mpw
 			now := time.Now()
 			status := progress.Status{Action: "Merging", Started: &now, Completed: &now}
-			msg := fmt.Sprintf("Merging edge %s", e.edge.Vertex.Name())
+			msg := fmt.Sprintf("Deduplicating step ID %s, another build is calculating it", e.edge.Vertex.Name())
 			_ = writer.Write(msg, status)
 		}
 	}

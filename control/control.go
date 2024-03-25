@@ -492,6 +492,36 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 	}
 	procs = append(procs, copyMetadata)
 
+	// DEPOT: send source dockerfile to the API in the background, if it exists.
+	tryReportDockerfile := func() {
+		ctx := context.Background()
+
+		buildTarget, ok := req.FrontendAttrs[depot.BuildArgTarget]
+		if !ok {
+			return
+		}
+
+		name, ok := metadata[depot.BuildDockerfileName]
+		if !ok {
+			return
+		}
+
+		contents, ok := metadata[depot.BuildDockerfile]
+		if !ok {
+			return
+		}
+
+		req := &depot.BuildContextRequest{
+			SpiffeID:       spiffeID,
+			Bearer:         bearer,
+			BuildTarget:    buildTarget,
+			DockerfileName: string(name),
+			Contents:       string(contents),
+		}
+
+		depot.SendBuildContext(ctx, req)
+	}
+
 	ctx = depot.WithSpiffe(ctx, spiffeID)
 	resp, sboms, err := c.solver.Solve(ctx, req.Ref, req.Session, frontend.SolveRequest{
 		Frontend:       req.Frontend,
@@ -505,6 +535,7 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		Type:           req.Exporter,
 		Attrs:          req.ExporterAttrs,
 	}, req.Entitlements, procs, req.Internal, req.SourcePolicy)
+	go tryReportDockerfile()
 	if err != nil {
 		return nil, err
 	}
@@ -563,24 +594,6 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 			bklog.G(ctx).WithError(err).Errorf("unable to send SBOM to API, retrying")
 			time.Sleep(100 * time.Millisecond)
 		}
-	}()
-
-	// DEPOT: send source dockerfile to the API in the background.
-	go func() {
-		ctx := context.Background()
-		buildTarget := req.FrontendAttrs[depot.BuildArgTarget]
-		name := string(metadata[depot.BuildDockerfileName])
-		contents := string(metadata[depot.BuildDockerfile])
-
-		req := &depot.BuildContextRequest{
-			SpiffeID:       spiffeID,
-			Bearer:         bearer,
-			BuildTarget:    buildTarget,
-			DockerfileName: name,
-			Contents:       contents,
-		}
-
-		depot.SendBuildContext(ctx, req)
 	}()
 
 	return &controlapi.SolveResponse{

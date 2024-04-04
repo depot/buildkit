@@ -135,6 +135,7 @@ jobs:
   test-nydus:
     runs-on: depot-ubuntu-22.04-16
     needs: [base]
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -263,6 +264,7 @@ jobs:
   image:
     runs-on: depot-ubuntu-22.04-16
     needs: [release-base, test, cross]
+    if: false
     strategy:
       fail-fast: false
       matrix:

@@ -515,6 +515,20 @@ func (ic *ImageWriter) commitDistributionManifest(ctx context.Context, opts *Ima
 		ConfigBytes:   config,
 	}
 
+	// DEPOT: Add the manifest and config to the export lease so they can be pulled by the client.
+	if leaseID != "" {
+		ic.opt.LeasesManager.AddResource(
+			ctx,
+			leases.Lease{ID: leaseID},
+			leases.Resource{ID: mfstDigest.String(), Type: "content"},
+		)
+		ic.opt.LeasesManager.AddResource(
+			ctx,
+			leases.Lease{ID: leaseID},
+			leases.Resource{ID: configDigest.String(), Type: "content"},
+		)
+	}
+
 	return committed, nil
 }
 
@@ -636,6 +650,20 @@ func (ic *ImageWriter) commitAttestationsManifest(ctx context.Context, opts *Ima
 		return nil, nil, done(errors.Wrap(err, "error writing config blob"))
 	}
 	done(nil)
+
+	// DEPOT: Add the manifest and config to the export lease so they can be pulled by the client.
+	if leaseID != "" {
+		ic.opt.LeasesManager.AddResource(
+			ctx,
+			leases.Lease{ID: leaseID},
+			leases.Resource{ID: mfstDigest.String(), Type: "content"},
+		)
+		ic.opt.LeasesManager.AddResource(
+			ctx,
+			leases.Lease{ID: leaseID},
+			leases.Resource{ID: configDigest.String(), Type: "content"},
+		)
+	}
 
 	attestationsManifest := &ocispecs.Descriptor{
 		Digest:    mfstDigest,

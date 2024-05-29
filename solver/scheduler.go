@@ -176,6 +176,8 @@ func (s *scheduler) dispatch(e *edge) {
 				if e.isDep(origEdge) || origEdge.isDep(e) {
 					bklog.G(context.TODO()).Debugf("skip merge due to dependency")
 				} else {
+					// DEPOT: Report merged edges to progress writer. This is important as it is confusing when merges happen.
+					depotReportMergedEdges(e)
 					bklog.G(context.TODO()).Debugf("merging edge %s to %s\n", e.edge.Vertex.Name(), origEdge.edge.Vertex.Name())
 					if s.mergeTo(origEdge, e) {
 						s.ef.setEdge(e.edge, origEdge)

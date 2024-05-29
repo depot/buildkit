@@ -50,6 +50,9 @@ const (
 	// MachineServiceReportBuildContextProcedure is the fully-qualified name of the MachineService's
 	// ReportBuildContext RPC.
 	MachineServiceReportBuildContextProcedure = "/depot.cloud.v3.MachineService/ReportBuildContext"
+	// MachineServiceReportContextItemsProcedure is the fully-qualified name of the MachineService's
+	// ReportContextItems RPC.
+	MachineServiceReportContextItemsProcedure = "/depot.cloud.v3.MachineService/ReportContextItems"
 )
 
 // MachineServiceClient is a client for the depot.cloud.v3.MachineService service.
@@ -60,6 +63,7 @@ type MachineServiceClient interface {
 	ReportStatus(context.Context) *connect.ClientStreamForClient[api.ReportStatusRequest, api.ReportStatusResponse]
 	ReportSBOM(context.Context, *connect.Request[api.ReportSBOMRequest]) (*connect.Response[api.ReportSBOMResponse], error)
 	ReportBuildContext(context.Context, *connect.Request[api.ReportBuildContextRequest]) (*connect.Response[api.ReportBuildContextResponse], error)
+	ReportContextItems(context.Context, *connect.Request[api.ReportContextItemsRequest]) (*connect.Response[api.ReportContextItemsResponse], error)
 }
 
 // NewMachineServiceClient constructs a client for the depot.cloud.v3.MachineService service. By
@@ -102,6 +106,11 @@ func NewMachineServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			baseURL+MachineServiceReportBuildContextProcedure,
 			opts...,
 		),
+		reportContextItems: connect.NewClient[api.ReportContextItemsRequest, api.ReportContextItemsResponse](
+			httpClient,
+			baseURL+MachineServiceReportContextItemsProcedure,
+			opts...,
+		),
 	}
 }
 
@@ -113,6 +122,7 @@ type machineServiceClient struct {
 	reportStatus       *connect.Client[api.ReportStatusRequest, api.ReportStatusResponse]
 	reportSBOM         *connect.Client[api.ReportSBOMRequest, api.ReportSBOMResponse]
 	reportBuildContext *connect.Client[api.ReportBuildContextRequest, api.ReportBuildContextResponse]
+	reportContextItems *connect.Client[api.ReportContextItemsRequest, api.ReportContextItemsResponse]
 }
 
 // RegisterMachine calls depot.cloud.v3.MachineService.RegisterMachine.
@@ -145,6 +155,11 @@ func (c *machineServiceClient) ReportBuildContext(ctx context.Context, req *conn
 	return c.reportBuildContext.CallUnary(ctx, req)
 }
 
+// ReportContextItems calls depot.cloud.v3.MachineService.ReportContextItems.
+func (c *machineServiceClient) ReportContextItems(ctx context.Context, req *connect.Request[api.ReportContextItemsRequest]) (*connect.Response[api.ReportContextItemsResponse], error) {
+	return c.reportContextItems.CallUnary(ctx, req)
+}
+
 // MachineServiceHandler is an implementation of the depot.cloud.v3.MachineService service.
 type MachineServiceHandler interface {
 	RegisterMachine(context.Context, *connect.Request[api.RegisterMachineRequest], *connect.ServerStream[api.RegisterMachineResponse]) error
@@ -153,6 +168,7 @@ type MachineServiceHandler interface {
 	ReportStatus(context.Context, *connect.ClientStream[api.ReportStatusRequest]) (*connect.Response[api.ReportStatusResponse], error)
 	ReportSBOM(context.Context, *connect.Request[api.ReportSBOMRequest]) (*connect.Response[api.ReportSBOMResponse], error)
 	ReportBuildContext(context.Context, *connect.Request[api.ReportBuildContextRequest]) (*connect.Response[api.ReportBuildContextResponse], error)
+	ReportContextItems(context.Context, *connect.Request[api.ReportContextItemsRequest]) (*connect.Response[api.ReportContextItemsResponse], error)
 }
 
 // NewMachineServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -191,6 +207,11 @@ func NewMachineServiceHandler(svc MachineServiceHandler, opts ...connect.Handler
 		svc.ReportBuildContext,
 		opts...,
 	)
+	machineServiceReportContextItemsHandler := connect.NewUnaryHandler(
+		MachineServiceReportContextItemsProcedure,
+		svc.ReportContextItems,
+		opts...,
+	)
 	return "/depot.cloud.v3.MachineService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MachineServiceRegisterMachineProcedure:
@@ -205,6 +226,8 @@ func NewMachineServiceHandler(svc MachineServiceHandler, opts ...connect.Handler
 			machineServiceReportSBOMHandler.ServeHTTP(w, r)
 		case MachineServiceReportBuildContextProcedure:
 			machineServiceReportBuildContextHandler.ServeHTTP(w, r)
+		case MachineServiceReportContextItemsProcedure:
+			machineServiceReportContextItemsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -236,4 +259,8 @@ func (UnimplementedMachineServiceHandler) ReportSBOM(context.Context, *connect.R
 
 func (UnimplementedMachineServiceHandler) ReportBuildContext(context.Context, *connect.Request[api.ReportBuildContextRequest]) (*connect.Response[api.ReportBuildContextResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.ReportBuildContext is not implemented"))
+}
+
+func (UnimplementedMachineServiceHandler) ReportContextItems(context.Context, *connect.Request[api.ReportContextItemsRequest]) (*connect.Response[api.ReportContextItemsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("depot.cloud.v3.MachineService.ReportContextItems is not implemented"))
 }

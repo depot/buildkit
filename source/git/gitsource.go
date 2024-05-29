@@ -556,6 +556,10 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to checkout remote %s", urlutil.RedactCredentials(gs.src.Remote))
 		}
+		_, err = gitWithinDir(ctx, checkoutDirGit, checkoutDir, sock, knownHosts, nil, "reset", "--hard", "FETCH_HEAD")
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to reset remote %s", urlutil.RedactCredentials(gs.src.Remote))
+		}
 		_, err = gitWithinDir(ctx, checkoutDirGit, "", sock, knownHosts, nil, "remote", "set-url", "origin", urlutil.RedactCredentials(gs.src.Remote))
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to set remote origin to %s", urlutil.RedactCredentials(gs.src.Remote))
@@ -579,6 +583,10 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		_, err = gitWithinDir(ctx, gitDir, cd, sock, knownHosts, nil, "checkout", ref, "--", ".")
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to checkout remote %s", urlutil.RedactCredentials(gs.src.Remote))
+		}
+		_, err = gitWithinDir(ctx, gitDir, cd, sock, knownHosts, nil, "reset", "--hard", ref)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to reset remote %s", urlutil.RedactCredentials(gs.src.Remote))
 		}
 		if subdir != "." {
 			d, err := os.Open(filepath.Join(cd, subdir))

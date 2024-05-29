@@ -5,8 +5,8 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  schedule:
-    - cron: '0 10 * * *'  # everyday at 10am
+  # schedule:
+  #   - cron: '0 10 * * *'  # everyday at 10am
   workflow_dispatch:
   push:
     branches:
@@ -135,6 +135,7 @@ jobs:
   test-nydus:
     runs-on: ubuntu-latest-16-cores
     needs: [base]
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -263,6 +264,7 @@ jobs:
   image:
     runs-on: ubuntu-latest-16-cores
     needs: [release-base, test, cross]
+    if: false
     strategy:
       fail-fast: false
       matrix:

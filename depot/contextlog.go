@@ -88,7 +88,7 @@ func NewContextLog(ctx context.Context, spiffe string, inner filesync.CacheUpdat
 // `Send` go routine to stop.
 //
 // This elaborate shutdown procedure is required as `ContentHasher` and `HandleChange`
-// may be called in a racy by by fsutil despite the context being canceled.
+// may be called in a racy way by fsutil despite the context being canceled.
 func (c *ContextLog) Close() error {
 	close(c.closed)
 	c.wg.Wait()
@@ -115,6 +115,10 @@ func (c *ContextLog) ContentHasher() fsutil.ContentHasher {
 			select {
 			case <-c.closed:
 			case c.startCh <- &Log{Path: stat.Path, At: time.Now(), Size: stat.Size_}:
+			// Occasionally, the process will be canceled during the ContentHasher call.
+			// Because fsutil doesn't wire context through, we skip recording the
+			// the Log.  The channel is likely to be closed soon.
+			default:
 			}
 		}
 
@@ -148,6 +152,10 @@ func (c *ContextLog) HandleChange(kind fsutil.ChangeKind, path string, stat os.F
 	select {
 	case <-c.closed:
 	case c.finishCh <- &Log{Path: path, At: time.Now(), Size: stat.Size(), Mode: stat.Mode()}:
+	// Occasionally, the process will be canceled during the ContentHasher call.
+	// Because fsutil doesn't wire context through, we skip recording the
+	// the Log.  The channel is likely to be closed soon.
+	default:
 	}
 
 	return nil

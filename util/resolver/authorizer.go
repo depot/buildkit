@@ -23,7 +23,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const defaultExpiration = 60
+// DEPOT: we have reduced this from 60 minutes to 10 minutes
+const defaultExpiration = 10
 
 type authHandlerNS struct {
 	counter int64 // needs to be 64bit aligned for 32bit systems

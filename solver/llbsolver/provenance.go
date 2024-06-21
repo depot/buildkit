@@ -136,11 +136,16 @@ func (b *provenanceBridge) ResolveImageConfig(ctx context.Context, ref string, o
 		return "", nil, err
 	}
 
-	b.images = append(b.images, provenance.ImageSource{
+	imageSource := provenance.ImageSource{
 		Ref:      ref,
 		Platform: opt.Platform,
 		Digest:   dgst,
-	})
+	}
+
+	b.mu.Lock()
+	b.images = append(b.images, imageSource)
+	b.mu.Unlock()
+
 	return dgst, config, nil
 }
 

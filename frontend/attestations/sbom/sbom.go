@@ -110,3 +110,19 @@ func HasSBOM[T any](res *result.Result[T]) bool {
 	}
 	return false
 }
+
+func SBOMOf[T any](res *result.Result[T]) map[string]*result.Attestation[T] {
+	var attestations map[string]*result.Attestation[T]
+
+	for platform, as := range res.Attestations {
+		for i := range as {
+			if as[i].InToto.PredicateType == intoto.PredicateSPDX {
+				if attestations == nil {
+					attestations = make(map[string]*result.Attestation[T])
+				}
+				attestations[platform] = &as[i]
+			}
+		}
+	}
+	return attestations
+}

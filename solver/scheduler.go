@@ -166,12 +166,18 @@ func (s *scheduler) dispatch(e *edge) {
 	// if keys changed there might be possiblity for merge with other edge
 	if e.keysDidChange {
 		if k := e.currentIndexKey(); k != nil {
+			// DEPOT: Skip merge to on assumption that it is causing inconsistent graph state.
+			// We have the logic inverted here so that we can continue to use the integration tests.
+			useMergeTo := os.Getenv("DEPOT_DISABLE_MERGE_TO") == ""
+
 			// skip this if not at least 1 key per dep
 			origEdge := e.index.LoadOrStore(k, e)
-			if origEdge != nil {
+			if origEdge != nil && useMergeTo {
 				if e.isDep(origEdge) || origEdge.isDep(e) {
 					bklog.G(context.TODO()).Debugf("skip merge due to dependency")
 				} else {
+					// DEPOT: Report merged edges to progress writer. This is important as it is confusing when merges happen.
+					depotReportMergedEdges(e)
 					bklog.G(context.TODO()).Debugf("merging edge %s to %s\n", e.edge.Vertex.Name(), origEdge.edge.Vertex.Name())
 					if s.mergeTo(origEdge, e) {
 						s.ef.setEdge(e.edge, origEdge)
@@ -348,7 +354,7 @@ func (pf *pipeFactory) NewInputRequest(ee Edge, req *edgeRequest) pipe.Receiver 
 	target := pf.s.ef.getEdge(ee)
 	if target == nil {
 		return pf.NewFuncRequest(func(_ context.Context) (interface{}, error) {
-			return nil, errors.Errorf("failed to get edge: inconsistent graph state")
+			return nil, errors.Errorf("failed to get edge: inconsistent graph state: %s %s", ee.Vertex.Name(), ee.Vertex.Digest())
 		})
 	}
 	p := pf.s.newPipe(target, pf.e, pipe.Request{Payload: req})
@@ -374,14 +380,20 @@ func debugSchedulerPreUnpark(e *edge, inc []pipe.Sender, updates, allPipes []pip
 	for i, dep := range e.deps {
 		des := edgeStatusInitial
 		if dep.req != nil {
-			des = dep.req.Request().(*edgeRequest).desiredState
+			if edgeReq, ok := dep.req.Request().(*edgeRequest); ok {
+				des = edgeReq.desiredState
+			}
 		}
 		log.Debugf(":: dep%d %s state=%s des=%s keys=%d hasslowcache=%v preprocessfunc=%v", i, e.edge.Vertex.Inputs()[i].Vertex.Name(), dep.state, des, len(dep.keys), e.slowCacheFunc(dep) != nil, e.preprocessFunc(dep) != nil)
 	}
 
 	for i, in := range inc {
 		req := in.Request()
-		log.Debugf("> incoming-%d: %p dstate=%s canceled=%v", i, in, req.Payload.(*edgeRequest).desiredState, req.Canceled)
+		des := edgeStatusInitial
+		if edgeReq, ok := req.Payload.(*edgeRequest); ok {
+			des = edgeReq.desiredState
+		}
+		log.Debugf("> incoming-%d: %p dstate=%s canceled=%v", i, in, des, req.Canceled)
 	}
 
 	for i, up := range updates {

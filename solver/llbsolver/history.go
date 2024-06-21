@@ -16,6 +16,7 @@ import (
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/util/leaseutil"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -394,7 +395,7 @@ func (h *HistoryQueue) OpenBlobWriter(ctx context.Context, mt string) (_ *Writer
 		lm:    h.LeaseManager,
 		l:     l,
 		w:     w,
-		dgstr: digest.Canonical.Digester(),
+		dgstr: depot.NewFastDigester(),
 	}, nil
 }
 

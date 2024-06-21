@@ -10,6 +10,7 @@ import (
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/moby/buildkit/depot"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
@@ -101,7 +102,7 @@ func (b *buffer) Writer(ctx context.Context, opts ...content.WriterOpt) (content
 	b.mu.Unlock()
 	return &bufferedWriter{
 		main:     b,
-		digester: digest.Canonical.Digester(),
+		digester: depot.NewFastDigester(),
 		buffer:   bytes.NewBuffer(nil),
 		expected: wOpts.Desc.Digest,
 		releaseRef: func() {

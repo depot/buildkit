@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/solver/internal/pipe"
 	"github.com/moby/buildkit/util/bklog"
 	digest "github.com/opencontainers/go-digest"
@@ -901,6 +902,13 @@ func (e *edge) loadCache(ctx context.Context) (interface{}, error) {
 // execOp creates a request to execute the vertex operation
 func (e *edge) execOp(ctx context.Context) (interface{}, error) {
 	cacheKeys, inputs := e.commitOptions()
+	digests := make([]string, 0, len(cacheKeys))
+	for _, k := range cacheKeys {
+		digests = append(digests, k.digest.String())
+	}
+	ctx = depot.WithStableDigests(ctx, digests)
+	ctx = depot.WithVertexDigest(ctx, e.edge.Vertex.Digest().String())
+
 	results, subExporters, err := e.op.Exec(ctx, toResultSlice(inputs))
 	if err != nil {
 		return nil, errors.WithStack(err)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/containerd/containerd/platforms"
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/executor"
 	"github.com/moby/buildkit/frontend/gateway"
 	"github.com/moby/buildkit/session"
@@ -252,9 +253,15 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 		}
 	}
 
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
+
 	p, err := gateway.PrepareMounts(ctx, e.mm, e.cm, g, e.op.Meta.Cwd, e.op.Mounts, refs, func(m *pb.Mount, ref cache.ImmutableRef) (cache.MutableRef, error) {
 		desc := fmt.Sprintf("mount %s from exec %s", m.Dest, strings.Join(e.op.Meta.Args, " "))
-		return e.cm.New(ctx, ref, g, cache.WithDescription(desc))
+		return e.cm.New(ctx, ref, g,
+			cache.WithDescription(desc),
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest))
 	})
 	defer func() {
 		if err != nil {
@@ -279,6 +286,9 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 						err = errors.Wrapf(err, "error committing %s: %s", active.Ref.ID(), cerr)
 						continue
 					}
+					_ = ref.AppendStringSlice("depot.stableDigests", depot.StableDigests(ctx)...)
+					_ = ref.InsertIfNotExists("depot.vertexDigest", depot.VertexDigest(ctx))
+
 					execMounts[active.MountIndex] = worker.NewWorkerRefResult(ref, e.w)
 				}
 			}
@@ -366,13 +376,20 @@ func (e *ExecOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 
 	for i, out := range p.OutputRefs {
 		if mutable, ok := out.Ref.(cache.MutableRef); ok {
+			_ = mutable.AppendStringSlice("depot.stableDigests", depot.StableDigests(ctx)...)
+			_ = mutable.InsertIfNotExists("depot.vertexDigest", depot.VertexDigest(ctx))
 			ref, err := mutable.Commit(ctx)
 			if err != nil {
 				return nil, errors.Wrapf(err, "error committing %s", mutable.ID())
 			}
+			_ = ref.AppendStringSlice("depot.stableDigests", depot.StableDigests(ctx)...)
+			_ = ref.InsertIfNotExists("depot.vertexDigest", depot.VertexDigest(ctx))
 			results = append(results, worker.NewWorkerRefResult(ref, e.w))
 		} else {
-			results = append(results, worker.NewWorkerRefResult(out.Ref.(cache.ImmutableRef), e.w))
+			ref := out.Ref.(cache.ImmutableRef)
+			_ = ref.AppendStringSlice("depot.stableDigests", depot.StableDigests(ctx)...)
+			_ = ref.InsertIfNotExists("depot.vertexDigest", depot.VertexDigest(ctx))
+			results = append(results, worker.NewWorkerRefResult(ref, e.w))
 		}
 		// Prevent the result from being released.
 		p.OutputRefs[i].Ref = nil

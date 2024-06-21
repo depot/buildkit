@@ -113,7 +113,7 @@ func Push(ctx context.Context, sm *session.Manager, sid string, provider content
 	handlers := append([]images.Handler{},
 		images.HandlerFunc(annotateDistributionSourceHandler(manager, annotations, childrenHandler(provider))),
 		filterHandler,
-		dedupeHandler(pushUpdateSourceHandler),
+		loggingMiddleware(dedupeHandler(pushUpdateSourceHandler)),
 	)
 
 	ra, err := provider.ReaderAt(ctx, desc)
@@ -126,7 +126,8 @@ func Push(ctx context.Context, sm *session.Manager, sid string, provider content
 		return err
 	}
 
-	layersDone := progress.OneOff(ctx, "pushing layers")
+	// DEPOT: Adding ref is UX to make it clear that more than one image is being pushed.
+	layersDone := progress.OneOff(ctx, fmt.Sprintf("pushing layers for %s", ref))
 	err = images.Dispatch(ctx, skipNonDistributableBlobs(images.Handlers(handlers...)), nil, ocispecs.Descriptor{
 		Digest:    dgst,
 		Size:      ra.Size(),
@@ -327,5 +328,15 @@ func dedupeHandler(h images.HandlerFunc) images.HandlerFunc {
 			return nil, nil
 		}
 		return res.([]ocispecs.Descriptor), nil
+	})
+}
+
+// DEPOT: Add progress for each layer to help show which layers are taking a while to push.
+func loggingMiddleware(h images.HandlerFunc) images.HandlerFunc {
+	return images.HandlerFunc(func(ctx context.Context, desc ocispecs.Descriptor) ([]ocispecs.Descriptor, error) {
+		d := progress.OneOff(ctx, fmt.Sprintf("pushing layer %s", desc.Digest.String()))
+		children, err := h(ctx, desc)
+		_ = d(err)
+		return children, err
 	})
 }

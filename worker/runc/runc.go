@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/containerd/containerd/content/local"
 	"github.com/containerd/containerd/diff/apply"
@@ -13,7 +14,6 @@ import (
 	"github.com/containerd/containerd/platforms"
 	ctdsnapshot "github.com/containerd/containerd/snapshots"
 	"github.com/docker/docker/pkg/idtools"
-	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/cache/metadata"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/executor/runcexecutor"
@@ -24,6 +24,7 @@ import (
 	"github.com/moby/buildkit/worker/base"
 	wlabel "github.com/moby/buildkit/worker/label"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/sirupsen/logrus"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sync/semaphore"
 )
@@ -35,7 +36,7 @@ type SnapshotterFactory struct {
 }
 
 // NewWorkerOpt creates a WorkerOpt.
-func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *idtools.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux bool, parallelismSem *semaphore.Weighted, traceSocket, defaultCgroupParent string) (base.WorkerOpt, error) {
+func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, processMode oci.ProcessMode, labels map[string]string, idmap *idtools.IdentityMapping, nopt netproviders.Opt, dns *oci.DNSConfig, binary, apparmorProfile string, selinux, gpu bool, parallelismSem *semaphore.Weighted, traceSocket, defaultCgroupParent string) (base.WorkerOpt, error) {
 	var opt base.WorkerOpt
 	name := "runc-" + snFactory.Name
 	root = filepath.Join(root, name)
@@ -67,6 +68,7 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		DNS:                 dns,
 		ApparmorProfile:     apparmorProfile,
 		SELinux:             selinux,
+		GPU:                 gpu,
 		TracingSocket:       traceSocket,
 		DefaultCgroupParent: defaultCgroupParent,
 	}, np)
@@ -78,24 +80,64 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 		return opt, err
 	}
 
-	c, err := local.NewStore(filepath.Join(root, "content"))
+	// DEPOT: Concurrently open the boltdbs as it can be very slow.
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	var (
+		metadataDB  *metadata.Store
+		metadataErr error
+
+		containerdMeta *ctdmetadata.DB
+		containerdErr  error
+	)
+
+	contentStore, err := local.NewStore(filepath.Join(root, "content"))
 	if err != nil {
 		return opt, err
 	}
 
-	db, err := bolt.Open(filepath.Join(root, "containerdmeta.db"), 0644, nil)
-	if err != nil {
-		return opt, err
+	go func() {
+		defer wg.Done()
+
+		logrus.Info("Opening metadata.db")
+		metadataDB, metadataErr = metadata.NewStore(filepath.Join(root, "metadata_v2.db"))
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		logrus.Info("Opening metadata containerdmeta.go")
+		options := *bolt.DefaultOptions
+		// Reading bbolt's freelist sometimes fails when the file has a data corruption.
+		// Disabling freelist sync reduces the chance of the breakage.
+		// https://github.com/etcd-io/bbolt/pull/1
+		// https://github.com/etcd-io/bbolt/pull/6
+		options.NoFreelistSync = true
+
+		var containerdBolt *bolt.DB
+		containerdBolt, containerdErr = bolt.Open(filepath.Join(root, "containerdmeta.db"), 0644, &options)
+		if err != nil {
+			return
+		}
+
+		containerdMeta = ctdmetadata.NewDB(containerdBolt, contentStore, map[string]ctdsnapshot.Snapshotter{
+			snFactory.Name: s,
+		})
+
+		containerdErr = containerdMeta.Init(context.TODO())
+	}()
+
+	wg.Wait()
+
+	if metadataErr != nil {
+		return opt, metadataErr
+	}
+	if containerdErr != nil {
+		return opt, containerdErr
 	}
 
-	mdb := ctdmetadata.NewDB(db, c, map[string]ctdsnapshot.Snapshotter{
-		snFactory.Name: s,
-	})
-	if err := mdb.Init(context.TODO()); err != nil {
-		return opt, err
-	}
-
-	c = containerdsnapshot.NewContentStore(mdb.ContentStore(), "buildkit")
+	contentStore = containerdsnapshot.NewContentStore(containerdMeta.ContentStore(), "buildkit")
 
 	id, err := base.ID(root)
 	if err != nil {
@@ -120,40 +162,24 @@ func NewWorkerOpt(root string, snFactory SnapshotterFactory, rootless bool, proc
 	for k, v := range labels {
 		xlabels[k] = v
 	}
-	lm := leaseutil.WithNamespace(ctdmetadata.NewLeaseManager(mdb), "buildkit")
-	snap := containerdsnapshot.NewSnapshotter(snFactory.Name, mdb.Snapshotter(snFactory.Name), "buildkit", idmap)
-
-	if err := cache.MigrateV2(
-		context.TODO(),
-		filepath.Join(root, "metadata.db"),
-		filepath.Join(root, "metadata_v2.db"),
-		c,
-		snap,
-		lm,
-	); err != nil {
-		return opt, err
-	}
-
-	md, err := metadata.NewStore(filepath.Join(root, "metadata_v2.db"))
-	if err != nil {
-		return opt, err
-	}
+	lm := leaseutil.WithNamespace(ctdmetadata.NewLeaseManager(containerdMeta), "buildkit")
+	snap := containerdsnapshot.NewSnapshotter(snFactory.Name, containerdMeta.Snapshotter(snFactory.Name), "buildkit", idmap)
 
 	opt = base.WorkerOpt{
 		ID:               id,
 		Labels:           xlabels,
-		MetadataStore:    md,
+		MetadataStore:    metadataDB,
 		NetworkProviders: np,
 		Executor:         exe,
 		Snapshotter:      snap,
-		ContentStore:     c,
-		Applier:          winlayers.NewFileSystemApplierWithWindows(c, apply.NewFileSystemApplier(c)),
-		Differ:           winlayers.NewWalkingDiffWithWindows(c, walking.NewWalkingDiff(c)),
+		ContentStore:     contentStore,
+		Applier:          winlayers.NewFileSystemApplierWithWindows(contentStore, apply.NewFileSystemApplier(contentStore)),
+		Differ:           winlayers.NewWalkingDiffWithWindows(contentStore, walking.NewWalkingDiff(contentStore)),
 		ImageStore:       nil, // explicitly
 		Platforms:        []ocispecs.Platform{platforms.Normalize(platforms.DefaultSpec())},
 		IdentityMapping:  idmap,
 		LeaseManager:     lm,
-		GarbageCollect:   mdb.GarbageCollect,
+		GarbageCollect:   containerdMeta.GarbageCollect,
 		ParallelismSem:   parallelismSem,
 		MountPoolRoot:    filepath.Join(root, "cachemounts"),
 	}

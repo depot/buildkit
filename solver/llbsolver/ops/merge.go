@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/worker"
 	"github.com/pkg/errors"
 
@@ -47,7 +48,7 @@ func (m *mergeOp) CacheMap(ctx context.Context, group session.Group, index int) 
 	}
 
 	cm := &solver.CacheMap{
-		Digest: digest.Digest(dt),
+		Digest: digest.FromBytes(dt),
 		Deps: make([]struct {
 			Selector          digest.Digest
 			ComputeDigestFunc solver.ResultBasedCacheFunc
@@ -82,7 +83,10 @@ func (m *mergeOp) Exec(ctx context.Context, g session.Group, inputs []solver.Res
 	}
 
 	mergedRef, err := m.worker.CacheManager().Merge(ctx, refs, solver.ProgressControllerFromContext(ctx),
-		cache.WithDescription(m.vtx.Name()))
+		cache.WithDescription(m.vtx.Name()),
+		cache.WithStableDigests(depot.StableDigests(ctx)),
+		cache.WithVertexDigest(depot.VertexDigest(ctx)),
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,8 @@ package oci
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -52,7 +54,7 @@ func (pm ProcessMode) String() string {
 
 // GenerateSpec generates spec using containerd functionality.
 // opts are ignored for s.Process, s.Hostname, and s.Mounts .
-func GenerateSpec(ctx context.Context, meta executor.Meta, mounts []executor.Mount, id, resolvConf, hostsFile string, namespace network.Namespace, cgroupParent string, processMode ProcessMode, idmap *idtools.IdentityMapping, apparmorProfile string, selinuxB bool, tracingSocket string, opts ...oci.SpecOpts) (*specs.Spec, func(), error) {
+func GenerateSpec(ctx context.Context, meta executor.Meta, mounts []executor.Mount, id, resolvConf, hostsFile string, namespace network.Namespace, cgroupParent string, processMode ProcessMode, idmap *idtools.IdentityMapping, apparmorProfile string, selinuxB, gpu bool, tracingSocket string, opts ...oci.SpecOpts) (*specs.Spec, func(), error) {
 	c := &containers.Container{
 		ID: id,
 	}
@@ -125,6 +127,11 @@ func GenerateSpec(ctx context.Context, meta executor.Meta, mounts []executor.Mou
 		oci.WithNewPrivileges,
 		oci.WithHostname(hostname),
 	)
+
+	// DEPOT: adding GPU will add run the nvidia-container-runtime-hook too setup drivers.
+	if gpu {
+		opts = append(opts, WithGPU())
+	}
 
 	s, err := oci.GenerateSpec(ctx, nil, c, opts...)
 	if err != nil {
@@ -296,4 +303,29 @@ func specMapping(s []idtools.IDMap) []specs.LinuxIDMapping {
 		})
 	}
 	return ids
+}
+
+func WithGPU() oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, spec *specs.Spec) error {
+		if spec.Hooks == nil {
+			spec.Hooks = &specs.Hooks{}
+		}
+
+		const nvidiaHook = "nvidia-container-runtime-hook"
+		path, err := exec.LookPath(nvidiaHook)
+		if err != nil {
+			return err
+		}
+
+		spec.Hooks.Prestart = append(spec.Hooks.Prestart, specs.Hook{
+			Path: path,
+			Args: []string{
+				nvidiaHook,
+				"prestart",
+			},
+			Env: os.Environ(),
+		})
+
+		return nil
+	}
 }

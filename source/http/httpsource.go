@@ -17,6 +17,7 @@ import (
 
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver"
@@ -246,7 +247,14 @@ func (hs *httpSourceHandler) CacheKey(ctx context.Context, g session.Group, inde
 }
 
 func (hs *httpSourceHandler) save(ctx context.Context, resp *http.Response, s session.Group) (ref cache.ImmutableRef, dgst digest.Digest, retErr error) {
-	newRef, err := hs.cache.New(ctx, nil, s, cache.CachePolicyRetain, cache.WithDescription(fmt.Sprintf("http url %s", hs.src.URL)))
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
+	newRef, err := hs.cache.New(ctx, nil, s,
+		cache.CachePolicyRetain,
+		cache.WithDescription(fmt.Sprintf("http url %s", hs.src.URL)),
+		cache.WithStableDigests(stableDigests),
+		cache.WithVertexDigest(vertexDigest),
+	)
 	if err != nil {
 		return nil, "", err
 	}
@@ -344,6 +352,8 @@ func (hs *httpSourceHandler) save(ctx context.Context, resp *http.Response, s se
 		return nil, "", err
 	}
 	newRef = nil
+	_ = ref.AppendStringSlice("depot.stableDigests", stableDigests...)
+	_ = ref.InsertIfNotExists("depot.vertexDigest", vertexDigest)
 	md := cacheRefMetadata{ref}
 
 	hs.refID = ref.ID()

@@ -27,7 +27,6 @@ func main() {
 	}
 
 	if err := grpcclient.RunFromEnvironment(appcontext.Context(), dockerfile.Build); err != nil {
-		logrus.Errorf("fatal error: %+v", err)
-		panic(err)
+		logrus.Fatalf("fatal error: %+v", err)
 	}
 }

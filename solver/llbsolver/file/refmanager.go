@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver/llbsolver/ops/fileoptypes"
@@ -40,7 +41,14 @@ func (rm *RefManager) Prepare(ctx context.Context, ref fileoptypes.Ref, readonly
 		desc = d
 	}
 
-	mr, err := rm.cm.New(ctx, ir, g, cache.WithDescription(desc), cache.CachePolicyRetain)
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
+	mr, err := rm.cm.New(ctx, ir, g,
+		cache.WithDescription(desc),
+		cache.CachePolicyRetain,
+		cache.WithStableDigests(stableDigests),
+		cache.WithVertexDigest(vertexDigest),
+	)
 	if err != nil {
 		return nil, err
 	}

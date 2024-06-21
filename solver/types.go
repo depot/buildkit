@@ -33,6 +33,9 @@ type Vertex interface {
 	Inputs() []Edge
 
 	Name() string
+
+	// DEPOT: we give access to the vertex description so we can get the spiffe id.
+	Description() map[string]string
 }
 
 // Index is an index value for the return array of an operation. Index starts

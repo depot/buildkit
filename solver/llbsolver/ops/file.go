@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver/errdefs"
@@ -175,7 +176,10 @@ func (f *fileOp) Exec(ctx context.Context, g session.Group, inputs []solver.Resu
 
 	outResults := make([]solver.Result, 0, len(outs))
 	for _, out := range outs {
-		outResults = append(outResults, worker.NewWorkerRefResult(out.(cache.ImmutableRef), f.w))
+		ref := out.(cache.ImmutableRef)
+		_ = ref.AppendStringSlice("depot.stableDigests", depot.StableDigests(ctx)...)
+		_ = ref.InsertIfNotExists("depot.vertexDigest", depot.VertexDigest(ctx))
+		outResults = append(outResults, worker.NewWorkerRefResult(ref, f.w))
 	}
 
 	return outResults, nil

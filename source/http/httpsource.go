@@ -172,7 +172,10 @@ func (hs *httpSourceHandler) CacheKey(ctx context.Context, g session.Group, inde
 		}
 	}
 
-	client := hs.client(g)
+	client := http.DefaultClient
+	if hs.src.URL == "buildkit-session" {
+		client = hs.client(g)
+	}
 
 	// Some servers seem to have trouble supporting If-None-Match properly even
 	// though they return ETag-s. So first, optionally try a HEAD request with
@@ -205,12 +208,25 @@ func (hs *httpSourceHandler) CacheKey(ctx context.Context, g session.Group, inde
 		req.Method = "GET"
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", nil, false, err
+	var resp *http.Response
+	maxRetries := 5
+	if hs.src.URL == "buildkit-session" {
+		maxRetries = 1
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return "", "", nil, false, errors.Errorf("invalid response status %d", resp.StatusCode)
+	for i := 0; i < maxRetries; i++ {
+		resp, err = client.Do(req)
+		if err != nil {
+			return "", "", nil, false, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+			resp.Body.Close()
+			if i < maxRetries-1 {
+				return "", "", nil, false, errors.Errorf("invalid response status %d", resp.StatusCode)
+			}
+			time.Sleep(1 * time.Second)
+		} else {
+			break
+		}
 	}
 	if resp.StatusCode == http.StatusNotModified {
 		respETag := etagValue(resp.Header.Get("ETag"))

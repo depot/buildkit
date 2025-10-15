@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/moby/buildkit/depot"
 	srctypes "github.com/moby/buildkit/source/types"
 	"github.com/moby/buildkit/util/bklog"
 
@@ -45,13 +47,16 @@ func (ls *localSource) ID() string {
 	return srctypes.LocalScheme
 }
 
-func (ls *localSource) Resolve(ctx context.Context, id source.Identifier, sm *session.Manager, _ solver.Vertex) (source.SourceInstance, error) {
+// DEPOT: we pass the vertex to the handler so we can access the SPIFFE id.
+func (ls *localSource) Resolve(ctx context.Context, id source.Identifier, sm *session.Manager, vtx solver.Vertex) (source.SourceInstance, error) {
 	localIdentifier, ok := id.(*source.LocalIdentifier)
 	if !ok {
 		return nil, errors.Errorf("invalid local identifier %v", id)
 	}
 
 	return &localSourceHandler{
+		// DEPOT: we pass the vertex to the handler so we can access the SPIFFE id.
+		vtx:         vtx,
 		src:         *localIdentifier,
 		sm:          sm,
 		localSource: ls,
@@ -59,6 +64,8 @@ func (ls *localSource) Resolve(ctx context.Context, id source.Identifier, sm *se
 }
 
 type localSourceHandler struct {
+	// DEPOT: we pass the vertex to the handler so we can access the SPIFFE id within its description.
+	vtx solver.Vertex
 	src source.LocalIdentifier
 	sm  *session.Manager
 	*localSource
@@ -127,13 +134,21 @@ func (ls *localSourceHandler) snapshotWithAnySession(ctx context.Context, g sess
 func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Caller) (out cache.ImmutableRef, retErr error) {
 	sharedKey := ls.src.Name + ":" + ls.src.SharedKeyHint + ":" + caller.SharedKey() // TODO: replace caller.SharedKey() with source based hint from client(absolute-path+nodeid)
 
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
 	var mutable cache.MutableRef
 	sis, err := searchSharedKey(ctx, ls.cm, sharedKey)
 	if err != nil {
 		return nil, err
 	}
 	for _, si := range sis {
-		if m, err := ls.cm.GetMutable(ctx, si.ID()); err == nil {
+		m, err := ls.cm.GetMutable(
+			ctx,
+			si.ID(),
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
+		if err == nil {
 			bklog.G(ctx).Debugf("reusing ref for local: %s", m.ID())
 			mutable = m
 			break
@@ -143,7 +158,13 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 	}
 
 	if mutable == nil {
-		m, err := ls.cm.New(ctx, nil, nil, cache.CachePolicyRetain, cache.WithRecordType(client.UsageRecordTypeLocalSource), cache.WithDescription(fmt.Sprintf("local source for %s", ls.src.Name)))
+		m, err := ls.cm.New(ctx, nil, nil,
+			cache.CachePolicyRetain,
+			cache.WithRecordType(client.UsageRecordTypeLocalSource),
+			cache.WithDescription(fmt.Sprintf("local source for %s", ls.src.Name)),
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -185,6 +206,19 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 		return nil, err
 	}
 
+	var updater filesync.CacheUpdater = &cacheUpdater{cc, mount.IdentityMapping()}
+	// DEPOT: capture the context sync changes (skipping .dockerignore is a minor optimization).
+	isNotDockerignore := !strings.Contains(ls.src.SharedKeyHint, ".dockerignore")
+	if ls.src.Name == "context" && isNotDockerignore && depot.ContextLogFeatureEnabled() {
+		spiffe := depot.SpiffeFromVertex(ls.vtx)
+		if spiffe != "" {
+			log := depot.NewContextLog(ctx, spiffe, updater)
+			// DEPOT: We put the defer into a background go routine as to not block the build.
+			defer func() { go func() { _ = log.Close() }() }()
+			updater = log
+		}
+	}
+
 	opt := filesync.FSSendRequestOpt{
 		Name:             ls.src.Name,
 		IncludePatterns:  ls.src.IncludePatterns,
@@ -192,7 +226,7 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 		FollowPaths:      ls.src.FollowPaths,
 		OverrideExcludes: false,
 		DestDir:          dest,
-		CacheUpdater:     &cacheUpdater{cc, mount.IdentityMapping()},
+		CacheUpdater:     updater,
 		ProgressCb:       newProgressHandler(ctx, "transferring "+ls.src.Name+":"),
 		Differ:           ls.src.Differ,
 	}
@@ -238,6 +272,8 @@ func (ls *localSourceHandler) snapshot(ctx context.Context, caller session.Calle
 	if err != nil {
 		return nil, err
 	}
+	_ = snap.AppendStringSlice("depot.stableDigests", stableDigests...)
+	_ = snap.InsertIfNotExists("depot.vertexDigest", vertexDigest)
 
 	mutable = nil // avoid deferred cleanup
 

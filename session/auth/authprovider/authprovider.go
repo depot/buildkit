@@ -28,7 +28,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const defaultExpiration = 60
+// DEPOT: we have reduced this from 60 minutes to 10 minutes
+const defaultExpiration = 10
 
 func NewDockerAuthProvider(cfg *configfile.ConfigFile) session.Attachable {
 	return &authProvider{
@@ -150,7 +151,7 @@ func (ap *authProvider) Credentials(ctx context.Context, req *auth.CredentialsRe
 		defer ap.mu.Unlock()
 		_, ok := ap.loggerCache[req.Host]
 		ap.loggerCache[req.Host] = struct{}{}
-		if !ok {
+		if !ok && ap.logger != nil {
 			return resp, progresswriter.Wrap(fmt.Sprintf("[auth] sharing credentials for %s", req.Host), ap.logger, func(progresswriter.SubLogger) error {
 				return err
 			})

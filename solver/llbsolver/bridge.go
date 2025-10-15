@@ -11,6 +11,7 @@ import (
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/frontend"
 	gw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/identity"
@@ -66,6 +67,12 @@ func (b *llbBridge) Warn(ctx context.Context, dgst digest.Digest, msg string, op
 
 func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImports []gw.CacheOptionsEntry, pol []*spb.Policy) (solver.CachedResultWithProvenance, error) {
 	w, err := b.resolveWorker()
+	if err != nil {
+		return nil, err
+	}
+	// DEPOT: extract the SPIFFE ID from the job. Yes, a job is a builder.
+	// Note: this is the same methodology as the entitlements and source policies in the next few lines.
+	spiffe, err := depot.SpiffeFromBuilder(b.builder)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +134,8 @@ func (b *llbBridge) loadResult(ctx context.Context, def *pb.Definition, cacheImp
 	}
 	dpc := &detectPrunedCacheID{}
 
-	edge, err := Load(ctx, def, polEngine, dpc.Load, ValidateEntitlements(ent), WithCacheSources(cms), NormalizeRuntimePlatforms(), WithValidateCaps())
+	// DEPOT: copy the SPIFFE to the vertex during load.
+	edge, err := Load(ctx, def, polEngine, dpc.Load, ValidateEntitlements(ent), WithCacheSources(cms), NormalizeRuntimePlatforms(), WithValidateCaps(), WithSpiffe(spiffe))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load LLB")
 	}
@@ -377,4 +385,30 @@ func cmKey(im gw.CacheOptionsEntry) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%s:%d", im.Type, i), nil
+}
+
+/*
+DEPOT: Some helpers for transferring the SPIFFE to the vertex.
+The reason for all this code is to avoid having to hard-code the key here.
+This does feel awkward.
+*/
+
+type DepotSetDescription struct {
+	opt *solver.VertexOptions
+}
+
+func (h *DepotSetDescription) Set(key, value string) {
+	if h.opt.Description == nil {
+		h.opt.Description = map[string]string{}
+	}
+	h.opt.Description[key] = value
+}
+
+func WithSpiffe(spiffe string) LoadOpt {
+	return func(op *pb.Op, meta *pb.OpMetadata, opt *solver.VertexOptions) error {
+		if spiffe != "" {
+			depot.VertexOptionsWithSpiffe(&DepotSetDescription{opt}, spiffe)
+		}
+		return nil
+	}
 }

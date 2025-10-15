@@ -19,6 +19,7 @@ import (
 	"github.com/docker/go-units"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/frontend"
 	"github.com/moby/buildkit/frontend/attestations"
@@ -386,13 +387,23 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 			if err != nil && len(errdefs.Sources(err)) == 0 {
 				return nil, errors.Wrapf(err, "failed with %s = %s", keySyntaxArg, cmdline)
 			}
-			return res, err
+			if err != nil {
+				return nil, err
+			}
+			// DEPOT: This allows us to get dockerfile all the way back at control.go.
+			depot.StoreBuildContext(res, dtDockerfile, filename)
+			return res, nil
 		} else if ref, cmdline, loc, ok := parser.DetectSyntax(dtDockerfile); ok {
 			res, err := forwardGateway(ctx, c, ref, cmdline)
 			if err != nil && len(errdefs.Sources(err)) == 0 {
 				return nil, wrapSource(err, sourceMap, loc)
 			}
-			return res, err
+			if err != nil {
+				return nil, err
+			}
+			// DEPOT: This allows us to get dockerfile all the way back at control.go.
+			depot.StoreBuildContext(res, dtDockerfile, filename)
+			return res, nil
 		}
 	}
 
@@ -401,7 +412,12 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 	}
 
 	if res, ok, err := checkSubRequest(ctx, opts); ok {
-		return res, err
+		if err != nil {
+			return nil, err
+		}
+		// DEPOT: This allows us to get dockerfile all the way back at control.go.
+		depot.StoreBuildContext(res, dtDockerfile, filename)
+		return res, nil
 	}
 
 	exportMap := len(targetPlatforms) > 1
@@ -478,13 +494,26 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 			if err != nil {
 				return nil, err
 			}
-			return o.ToResult()
+
+			res, err := o.ToResult()
+			if err != nil {
+				return nil, err
+			}
+			// DEPOT: This allows us to get dockerfile all the way back at control.go.
+			depot.StoreBuildContext(res, dtDockerfile, filename)
+			return res, nil
 		case targets.SubrequestsTargetsDefinition.Name:
 			targets, err := dockerfile2llb.ListTargets(ctx, dtDockerfile)
 			if err != nil {
 				return nil, err
 			}
-			return targets.ToResult()
+			res, err := targets.ToResult()
+			if err != nil {
+				return nil, err
+			}
+			// DEPOT: This allows us to get dockerfile all the way back at control.go.
+			depot.StoreBuildContext(res, dtDockerfile, filename)
+			return res, nil
 		default:
 			return nil, errdefs.NewUnsupportedSubrequestError(req)
 		}
@@ -649,6 +678,8 @@ func Build(ctx context.Context, c client.Client) (_ *client.Result, err error) {
 		return nil, err
 	}
 	res.AddMeta(exptypes.ExporterPlatformsKey, dt)
+	// DEPOT: This allows us to get dockerfile all the way back at control.go.
+	depot.StoreBuildContext(res, dtDockerfile, filename)
 
 	return res, nil
 }

@@ -1,6 +1,7 @@
 package llbsolver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/leases"
+	"github.com/containerd/continuity/fs"
+	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	slsa02 "github.com/in-toto/in-toto-golang/in_toto/slsa_provenance/v0.2"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/cache"
@@ -17,17 +22,22 @@ import (
 	"github.com/moby/buildkit/cache/remotecache"
 	"github.com/moby/buildkit/client"
 	controlgateway "github.com/moby/buildkit/control/gateway"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/frontend"
+	"github.com/moby/buildkit/frontend/attestations/sbom"
 	"github.com/moby/buildkit/frontend/gateway"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver/provenance"
 	"github.com/moby/buildkit/solver/result"
 	spb "github.com/moby/buildkit/sourcepolicy/pb"
 	"github.com/moby/buildkit/util/attestation"
+	attestationTypes "github.com/moby/buildkit/util/attestation"
+	"github.com/moby/buildkit/util/bklog"
 	"github.com/moby/buildkit/util/buildinfo"
 	"github.com/moby/buildkit/util/compression"
 	"github.com/moby/buildkit/util/entitlements"
@@ -36,6 +46,7 @@ import (
 	"github.com/moby/buildkit/util/tracing/detect"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -399,10 +410,11 @@ func (s *Solver) recordBuildHistory(ctx context.Context, id string, req frontend
 	}, nil
 }
 
-func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req frontend.SolveRequest, exp ExporterRequest, ent []entitlements.Entitlement, post []Processor, internal bool, srcPol *spb.Policy) (_ *client.SolveResponse, err error) {
+// DEPOT: we return a second optional value, SBOM.
+func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req frontend.SolveRequest, exp ExporterRequest, ent []entitlements.Entitlement, post []Processor, internal bool, srcPol *spb.Policy) (_ *client.SolveResponse, _ []depot.SBOM, err error) {
 	j, err := s.solver.NewJob(id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	defer j.Discard()
@@ -427,8 +439,11 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 
 	set, err := entitlements.WhiteList(ent, supportedEntitlements(s.entitlements))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	// DEPOT: we are plumbing the spiffe id all the way to the local source op.
+	depot.JobSetValueWithSpiffe(j, depot.SpiffeFrom(ctx))
 	j.SetValue(keyEntitlements, set)
 
 	if srcPol != nil {
@@ -447,7 +462,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		// LeaseManager calls, and there is a fixed 3s timeout in
 		// GatewayForwarder on build registration.
 		if err := s.gatewayForwarder.RegisterBuild(ctx, id, fwd); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer s.gatewayForwarder.UnregisterBuild(ctx, id)
 	}
@@ -456,7 +471,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		rec, err1 := s.recordBuildHistory(ctx, id, req, exp, j)
 		if err1 != nil {
 			defer j.CloseProgress()
-			return nil, err1
+			return nil, nil, err1
 		}
 		defer func() {
 			err = rec(resProv, descref, err)
@@ -472,12 +487,12 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			err = ctx.Err()
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		res, err = br.Solve(ctx, req, sessionID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -501,18 +516,18 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return nil
 	})
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	resProv, err = addProvenanceToResult(res, br)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for _, post := range post {
 		res2, err := post(ctx, resProv, s, j)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		resProv = res2
 	}
@@ -522,8 +537,9 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return res.Result(ctx)
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
 	inp, err := result.ConvertResult(cached, func(res solver.CachedResult) (cache.ImmutableRef, error) {
 		workerRef, ok := res.Sys().(*worker.WorkerRef)
 		if !ok {
@@ -532,7 +548,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		return workerRef.ImmutableRef, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	cacheExporters, inlineCacheExporter := splitCacheExporters(exp.CacheExporters)
@@ -541,7 +557,7 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 	if e := exp.Exporter; e != nil {
 		meta, err := runInlineCacheExporter(ctx, e, inlineCacheExporter, j, cached)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for k, v := range meta {
 			inp.AddMeta(k, v)
@@ -551,13 +567,13 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 			exporterResponse, descref, err = e.Export(ctx, inp, j.SessionID)
 			return err
 		}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
 	cacheExporterResponse, err := runCacheExporters(ctx, cacheExporters, j, cached, inp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if exporterResponse == nil {
@@ -578,9 +594,34 @@ func (s *Solver) Solve(ctx context.Context, id string, sessionID string, req fro
 		}
 	}
 
-	return &client.SolveResponse{
-		ExporterResponse: exporterResponse,
-	}, nil
+	// DEPOT: If the exporter does not produce SBOMs, we try to create them from the cached results.
+	var resultSBOMs []depot.SBOM
+	exportedSBOMs, ok := exporterResponse[depot.SBOMsLabel]
+	if ok {
+		// The exporters can only return back map[string]string.  As a result, we
+		// encode and then immediately decode here.
+		resultSBOMs, err = depot.DecodeSBOMs(exportedSBOMs)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else if sbomAttestations := sbom.SBOMOf(cached); sbomAttestations != nil {
+		// If the SBOM was created without creating an image, we still grab what information we have.
+		// These SBOMs will not have any "subjects."
+		w, err := s.workerController.GetDefault()
+		if err != nil {
+			return nil, nil, err
+		}
+		var leaseID string
+		resultSBOMs, leaseID, err = GetSBOM(ctx, w.ContentStore(), w.LeaseManager(), j.SessionID, sbomAttestations)
+		if err == nil && len(resultSBOMs) > 0 {
+			exportedSBOMs, err := depot.EncodeSBOMs(resultSBOMs)
+			if err == nil && exportedSBOMs != "" {
+				exporterResponse[depot.SBOMsLabel] = exportedSBOMs
+				exporterResponse[depot.ExportLeaseLabel] = leaseID
+			}
+		}
+	}
+	return &client.SolveResponse{ExporterResponse: exporterResponse}, resultSBOMs, nil
 }
 
 func runCacheExporters(ctx context.Context, exporters []RemoteCacheExporter, j *solver.Job, cached *result.Result[solver.CachedResult], inp *result.Result[cache.ImmutableRef]) (map[string]string, error) {
@@ -1000,4 +1041,93 @@ func loadSourcePolicy(b solver.Builder) (*spb.Policy, error) {
 		}
 	}
 	return srcPol, nil
+}
+
+// DEPOT: GetSBOM returns the SBOMs of the scanned layers.
+// This assumes that an image has not be created.
+func GetSBOM(ctx context.Context, contentStore content.Store, mgr leases.Manager, sessionID string, platformAttestations map[string]*result.Attestation[solver.CachedResult]) ([]depot.SBOM, string, error) {
+	var leaseID string
+	lease, err := depot.Lease(ctx, mgr, sessionID)
+	if err != nil {
+		bklog.G(ctx).Warnf("Unable to create lease for image export %v", err)
+	} else {
+		leaseID = lease.ID
+	}
+
+	var sboms []depot.SBOM
+	for platform, attestation := range platformAttestations {
+		sbomRef := attestation
+		if sbomRef == nil || sbomRef.Ref == nil {
+			continue
+		}
+
+		sbomResult := sbomRef.Ref
+		workerRef, ok := sbomResult.Sys().(*worker.WorkerRef)
+		if !ok {
+			bklog.G(ctx).Errorf("invalid reference: %T", sbomResult.Sys())
+			return nil, "", errors.Errorf("invalid reference: %T", sbomResult.Sys())
+		}
+
+		inp := workerRef.ImmutableRef
+
+		sessionGroup := session.NewGroup(sessionID)
+		readOnly := true
+		mount, err := inp.Mount(ctx, readOnly, sessionGroup)
+		if err != nil {
+			bklog.G(ctx).Errorf("failed to mount: %v", err)
+			return nil, "", err
+		}
+		lm := snapshot.LocalMounter(mount)
+		root, err := lm.Mount()
+		if err != nil {
+			bklog.G(ctx).Errorf("failed to mount: %v", err)
+			return nil, "", err
+		}
+		defer func() {
+			if lm != nil {
+				_ = lm.Unmount()
+			}
+		}()
+		fp, err := fs.RootPath(root, "/sbom.spdx.json")
+		if err != nil {
+			bklog.G(ctx).Errorf("failed to get root path: %v", err)
+			return nil, "", err
+		}
+		statement, err := os.ReadFile(fp)
+		if err != nil {
+			bklog.G(ctx).Errorf("failed to read file: %v", err)
+			return nil, "", err
+		}
+
+		d := depot.NewFastDigester()
+		_, _ = d.Hash().Write(statement)
+		digest := d.Digest()
+		desc := ocispecs.Descriptor{
+			MediaType: attestationTypes.MediaTypeDockerSchema2AttestationType,
+			Digest:    digest,
+			Size:      int64(len(statement)),
+			Annotations: map[string]string{
+				"containerd.io/uncompressed": digest.String(),
+				"in-toto.io/predicate-type":  intoto.PredicateSPDX,
+			},
+		}
+
+		r := bytes.NewReader(statement)
+		err = content.WriteBlob(ctx, contentStore, digest.String(), r, desc)
+		if err != nil {
+			return nil, "", errors.Wrapf(err, "error writing SBOM blob %s", digest)
+		}
+
+		sboms = append(sboms, depot.SBOM{
+			Platform: platform,
+			Digest:   digest.String(),
+		})
+
+		mgr.AddResource(ctx, lease, leases.Resource{
+			ID:   digest.String(),
+			Type: "content",
+		})
+	}
+
+	return sboms, leaseID, nil
 }

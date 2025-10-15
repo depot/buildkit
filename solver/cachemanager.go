@@ -25,9 +25,12 @@ func NewCacheManager(ctx context.Context, id string, storage CacheKeyStorage, re
 		results: results,
 	}
 
-	if err := cm.ReleaseUnreferenced(); err != nil {
-		bklog.G(ctx).Errorf("failed to release unreferenced cache metadata: %+v", err)
-	}
+	// DEPOT: background the cleanup
+	go func() {
+		if err := cm.ReleaseUnreferenced(); err != nil {
+			bklog.G(ctx).Errorf("failed to release unreferenced cache metadata: %+v", err)
+		}
+	}()
 
 	return cm
 }

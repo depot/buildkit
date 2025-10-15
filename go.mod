@@ -3,6 +3,7 @@ module github.com/moby/buildkit
 go 1.18
 
 require (
+	connectrpc.com/connect v1.11.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.1.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v0.4.1
 	github.com/Microsoft/go-winio v0.5.2
@@ -42,6 +43,8 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/in-toto/in-toto-golang v0.5.0
 	github.com/klauspost/compress v1.15.12
+	github.com/klauspost/pgzip v1.2.5
+	github.com/minio/sha256-simd v1.0.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/moby/locker v1.0.1
 	github.com/moby/patternmatcher v0.5.0
@@ -86,7 +89,7 @@ require (
 	golang.org/x/time v0.1.0
 	google.golang.org/genproto v0.0.0-20220706185917-7780775163c4
 	google.golang.org/grpc v1.50.1
-	google.golang.org/protobuf v1.28.1
+	google.golang.org/protobuf v1.31.0
 )
 
 require (
@@ -131,6 +134,7 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.1 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.1 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.0.4 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/moby/sys/mount v0.3.3 // indirect
@@ -152,3 +156,5 @@ require (
 	golang.org/x/text v0.5.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/containerd/stargz-snapshotter => github.com/depot/stargz-snapshotter v0.13.0-depot.1

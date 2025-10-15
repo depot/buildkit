@@ -3414,6 +3414,11 @@ func (v *vertex) Options() VertexOptions {
 	}
 }
 
+// DEPOT: added to conform to our interface addition.
+func (v *vertex) Description() map[string]string {
+	return v.Options().Description
+}
+
 func (v *vertex) setupCallCounters() {
 	var cacheCount int64
 	var execCount int64

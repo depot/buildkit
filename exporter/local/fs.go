@@ -13,13 +13,13 @@ import (
 	"github.com/docker/docker/pkg/idtools"
 	intoto "github.com/in-toto/in-toto-golang/in_toto"
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/attestation"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/buildkit/solver/result"
 	"github.com/moby/buildkit/util/staticfs"
-	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 	"github.com/tonistiigi/fsutil"
 	fstypes "github.com/tonistiigi/fsutil/types"
@@ -110,7 +110,7 @@ func CreateFS(ctx context.Context, sessionID string, k string, ref cache.Immutab
 				return err
 			}
 			defer f.Close()
-			d := digest.Canonical.Digester()
+			d := depot.NewFastDigester()
 			if _, err := io.Copy(d.Hash(), f); err != nil {
 				return err
 			}

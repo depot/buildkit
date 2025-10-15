@@ -16,6 +16,7 @@ type Vertex struct {
 	Cached        bool
 	Error         string
 	ProgressGroup *pb.ProgressGroup
+	StableDigest  digest.Digest
 }
 
 type VertexStatus struct {

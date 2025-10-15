@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/containerd/containerd/pkg/seed"
@@ -33,6 +34,7 @@ import (
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	"github.com/moby/buildkit/control"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/frontend"
 	dockerfile "github.com/moby/buildkit/frontend/dockerfile/builder"
@@ -67,6 +69,10 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	_ "google.golang.org/grpc/encoding/gzip" // DEPOT: Install the gzip compressor
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 func init() {
@@ -238,7 +244,18 @@ func main() {
 		stream := grpc_middleware.ChainStreamServer(streamTracer, grpcerrors.StreamServerInterceptor)
 
 		opts := []grpc.ServerOption{grpc.UnaryInterceptor(unary), grpc.StreamInterceptor(stream)}
+
+		opts = append(opts, grpc.KeepaliveEnforcementPolicy(depot.LoadKeepaliveEnforcementPolicy()))
+		opts = append(opts, grpc.KeepaliveParams(depot.LoadKeepaliveServerParams()))
+
+		// DEPOT: if TLS is configured, make the gRPC server terminate and validate those credentials
+		// so that we get AuthInfo in the gRPC handlers
+		if tlsConfig, err := serverCredentials(cfg.GRPC.TLS); err == nil && tlsConfig != nil {
+			opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+		}
+
 		server := grpc.NewServer(opts...)
+		grpc_health_v1.RegisterHealthServer(server, health.NewServer())
 
 		// relative path does not work with nightlyone/lockfile
 		root, err := filepath.Abs(cfg.Root)
@@ -327,10 +344,14 @@ func serveGRPC(cfg config.GRPCConfig, server *grpc.Server, errCh chan error) err
 	if len(addrs) == 0 {
 		return errors.New("--addr cannot be empty")
 	}
-	tlsConfig, err := serverCredentials(cfg.TLS)
-	if err != nil {
-		return err
-	}
+
+	// DEPOT: skip listener TLS as we make the gRPC server validate TLS instead
+	// tlsConfig, err := serverCredentials(cfg.TLS)
+	// if err != nil {
+	// 	return err
+	// }
+	var tlsConfig *tls.Config
+
 	eg, _ := errgroup.WithContext(context.Background())
 	listeners := make([]net.Listener, 0, len(addrs))
 	for _, addr := range addrs {
@@ -541,7 +562,9 @@ func getListener(addr string, uid, gid int, tlsConfig *tls.Config) (net.Listener
 		}
 
 		if tlsConfig == nil {
-			logrus.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
+			// DEPOT: don't print this warning because we give the gRPC the TLS info directly, rather
+			// than terminating TLS at the listener
+			// logrus.Warnf("TLS is not enabled for %s. enabling mutual TLS authentication is highly recommended", addr)
 			return l, nil
 		}
 		return tls.NewListener(l, tlsConfig), nil
@@ -637,31 +660,59 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 		}
 	}
 
-	wc, err := newWorkerController(c, workerInitializerOpt{
-		config:         cfg,
-		sessionManager: sessionManager,
-		traceSocket:    traceSocket,
-	})
-	if err != nil {
-		return nil, err
+	// DEPOT: Concurrently open all bolt databases.
+	var (
+		workerController    *worker.Controller
+		workerControllerErr error
+
+		cacheStorage    *bboltcachestorage.Store
+		cacheStorageErr error
+
+		historyDB    *bbolt.DB
+		historyDBErr error
+	)
+
+	wg := sync.WaitGroup{}
+	wg.Add(3)
+
+	go func() {
+		workerController, workerControllerErr = newWorkerController(c, workerInitializerOpt{
+			config:         cfg,
+			sessionManager: sessionManager,
+			traceSocket:    traceSocket,
+		})
+		wg.Done()
+	}()
+	go func() {
+		logrus.Info("Opening cache.db")
+		cacheStorage, cacheStorageErr = bboltcachestorage.NewStore(filepath.Join(cfg.Root, "cache.db"))
+		wg.Done()
+	}()
+	go func() {
+		logrus.Info("Opening history.db")
+		historyDB, historyDBErr = bbolt.Open(filepath.Join(cfg.Root, "history.db"), 0600, nil)
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	if workerControllerErr != nil {
+		return nil, workerControllerErr
 	}
+	if cacheStorageErr != nil {
+		return nil, cacheStorageErr
+	}
+	if historyDBErr != nil {
+		return nil, historyDBErr
+	}
+
 	frontends := map[string]frontend.Frontend{}
-	frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(wc, dockerfile.Build)
-	frontends["gateway.v0"] = gateway.NewGatewayFrontend(wc)
-
-	cacheStorage, err := bboltcachestorage.NewStore(filepath.Join(cfg.Root, "cache.db"))
-	if err != nil {
-		return nil, err
-	}
-
-	historyDB, err := bbolt.Open(filepath.Join(cfg.Root, "history.db"), 0600, nil)
-	if err != nil {
-		return nil, err
-	}
+	frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(workerController, dockerfile.Build)
+	frontends["gateway.v0"] = gateway.NewGatewayFrontend(workerController)
 
 	resolverFn := resolverFunc(cfg)
 
-	w, err := wc.GetDefault()
+	worker, err := workerController.GetDefault()
 	if err != nil {
 		return nil, err
 	}
@@ -675,7 +726,7 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 		"azblob":   azblob.ResolveCacheExporterFunc(),
 	}
 	remoteCacheImporterFuncs := map[string]remotecache.ResolveCacheImporterFunc{
-		"registry": registryremotecache.ResolveCacheImporterFunc(sessionManager, w.ContentStore(), resolverFn),
+		"registry": registryremotecache.ResolveCacheImporterFunc(sessionManager, worker.ContentStore(), resolverFn),
 		"local":    localremotecache.ResolveCacheImporterFunc(sessionManager),
 		"gha":      gha.ResolveCacheImporterFunc(),
 		"s3":       s3remotecache.ResolveCacheImporterFunc(),
@@ -683,7 +734,7 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 	}
 	return control.NewController(control.Opt{
 		SessionManager:            sessionManager,
-		WorkerController:          wc,
+		WorkerController:          workerController,
 		Frontends:                 frontends,
 		ResolveCacheExporterFuncs: remoteCacheExporterFuncs,
 		ResolveCacheImporterFuncs: remoteCacheImporterFuncs,
@@ -691,8 +742,8 @@ func newController(c *cli.Context, cfg *config.Config) (*control.Controller, err
 		Entitlements:              cfg.Entitlements,
 		TraceCollector:            tc,
 		HistoryDB:                 historyDB,
-		LeaseManager:              w.LeaseManager(),
-		ContentStore:              w.ContentStore(),
+		LeaseManager:              worker.LeaseManager(),
+		ContentStore:              worker.ContentStore(),
 		HistoryConfig:             cfg.History,
 	})
 }

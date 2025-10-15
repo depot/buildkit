@@ -14,6 +14,11 @@ const (
 	ExporterBuildInfo            = "containerimage.buildinfo" // Deprecated: Build information is deprecated: https://github.com/moby/buildkit/blob/master/docs/deprecated.md
 	ExporterPlatformsKey         = "refs.platforms"
 	ExporterEpochKey             = "source.date.epoch"
+
+	// DEPOT: added to receive the manifest directly for the image.
+	DepotContainerImageIndex    = "depot.containerimage.index"
+	DepotContainerImageManifest = "depot.containerimage.manifest"
+	DepotContainerImageConfig   = "depot.containerimage.config"
 )
 
 // KnownRefMetadataKeys are the subset of exporter keys that can be suffixed by

@@ -47,6 +47,11 @@ func (v *vertex) Name() string {
 	return v.name
 }
 
+// DEPOT: we give access to the vertex description so we can get the spiffe id.
+func (v *vertex) Description() map[string]string {
+	return v.options.Description
+}
+
 type LoadOpt func(*pb.Op, *pb.OpMetadata, *solver.VertexOptions) error
 
 func WithValidateCaps() LoadOpt {

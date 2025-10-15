@@ -3,6 +3,7 @@ package solver
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -342,6 +343,13 @@ func (jl *Solver) loadUnlocked(v, parent Vertex, j *Job, cache map[Vertex]Vertex
 	// if same vertex is already loaded without cache just use that
 	st, ok := jl.actives[dgstWithoutCache]
 
+	if ok {
+		// When matching an existing active vertext by dgstWithoutCache, set v to the
+		// existing active vertex, as otherwise the original vertex will use an
+		// incorrect digest and can incorrectly delete it while it is still in use.
+		v = st.vtx
+	}
+
 	if !ok {
 		st, ok = jl.actives[dgst]
 
@@ -376,6 +384,9 @@ func (jl *Solver) loadUnlocked(v, parent Vertex, j *Job, cache map[Vertex]Vertex
 			cache:        map[string]CacheManager{},
 			solver:       jl,
 			origDigest:   origVtx.Digest(),
+		}
+		if debugScheduler {
+			log.Printf("loadUnlocked %s %v %v", dgst, jl.actives, st)
 		}
 		jl.actives[dgst] = st
 	}
@@ -492,6 +503,10 @@ func (jl *Solver) Get(id string) (*Job, error) {
 // called with solver lock
 func (jl *Solver) deleteIfUnreferenced(k digest.Digest, st *state) {
 	if len(st.jobs) == 0 && len(st.parents) == 0 {
+		if debugScheduler {
+			log.Printf("deleteIfUnreferenced %s %v %v", k, jl.actives, st)
+		}
+
 		for chKey := range st.childVtx {
 			chState := jl.actives[chKey]
 			delete(chState.parents, k)
@@ -518,8 +533,6 @@ func (j *Job) Build(ctx context.Context, e Edge) (CachedResultWithProvenance, er
 		return nil, err
 	}
 
-	j.list.mu.Lock()
-	defer j.list.mu.Unlock()
 	return &withProvenance{CachedResult: res, j: j, e: e}, nil
 }
 
@@ -534,6 +547,10 @@ func (wp *withProvenance) WalkProvenance(ctx context.Context, f func(ProvenanceP
 		return nil
 	}
 	m := map[digest.Digest]struct{}{}
+
+	wp.j.list.mu.Lock()
+	defer wp.j.list.mu.Unlock()
+
 	return wp.j.walkProvenance(ctx, wp.e, f, m)
 }
 
@@ -544,10 +561,12 @@ func (j *Job) walkProvenance(ctx context.Context, e Edge, f func(ProvenanceProvi
 	visited[e.Vertex.Digest()] = struct{}{}
 	if st, ok := j.list.actives[e.Vertex.Digest()]; ok {
 		st.mu.Lock()
-		if wp, ok := st.op.op.(ProvenanceProvider); ok {
-			if err := f(wp); err != nil {
-				st.mu.Unlock()
-				return err
+		if st.op != nil {
+			if wp, ok := st.op.op.(ProvenanceProvider); ok {
+				if err := f(wp); err != nil {
+					st.mu.Unlock()
+					return err
+				}
 			}
 		}
 		st.mu.Unlock()
@@ -722,7 +741,7 @@ func (s *sharedOp) CalcSlowCache(ctx context.Context, index Index, p PreprocessF
 		if p != nil {
 			st := s.st.solver.getState(s.st.vtx.Inputs()[index])
 			if st == nil {
-				return nil, errors.Errorf("failed to get state for index %d on %v", index, s.st.vtx.Name())
+				return nil, errors.Errorf("failed to get state for index %d on %v %s", index, s.st.vtx.Name(), s.st.vtx.Digest())
 			}
 			ctx2 := progress.WithProgress(ctx, st.mpw)
 			if st.mspan.Span != nil {
@@ -830,12 +849,21 @@ func (s *sharedOp) CacheMap(ctx context.Context, index int) (resp *cacheMapResp,
 					Digest:        s.st.vtx.Digest(),
 					Name:          s.st.vtx.Name(),
 					ProgressGroup: s.st.vtx.Options().ProgressGroup,
+					StableDigest:  res.Digest,
 				}
+				s.st.clientVertex.StableDigest = res.Digest
 				s.cacheRes = append(s.cacheRes, res)
 				s.cacheDone = done
 			}
 			s.cacheErr = err
 		}
+
+		if s.st.clientVertex.StableDigest.String() != "" {
+			// DEPOT: report stable digest to cli.
+			id := identity.NewID()
+			s.st.mpw.Write(id, s.st.clientVertex)
+		}
+
 		return s.cacheRes, err
 	})
 	if err != nil {
@@ -985,6 +1013,11 @@ func (v *vertexWithCacheOptions) Digest() digest.Digest {
 
 func (v *vertexWithCacheOptions) Inputs() []Edge {
 	return v.inputs
+}
+
+// DEPOT: conform to our interface addition allowing us to pass through the SPIFFE id.
+func (v *vertexWithCacheOptions) Description() map[string]string {
+	return v.Vertex.Options().Description
 }
 
 func notifyStarted(ctx context.Context, v *client.Vertex, cached bool) func(err error, cached bool) {

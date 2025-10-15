@@ -3,7 +3,6 @@ package contenthash
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"io"
 	"os"
 	"path"
@@ -14,6 +13,7 @@ import (
 	iradix "github.com/hashicorp/go-immutable-radix"
 	"github.com/hashicorp/golang-lru/simplelru"
 	"github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/snapshot"
 	"github.com/moby/locker"
@@ -432,7 +432,7 @@ func (cc *cacheContext) Checksum(ctx context.Context, mountable cache.Mountable,
 		return includedPaths[0].record.Digest, nil
 	}
 
-	digester := digest.Canonical.Digester()
+	digester := depot.NewFastDigester()
 	for i, w := range includedPaths {
 		if i != 0 {
 			digester.Hash().Write([]byte{0})
@@ -904,7 +904,7 @@ func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *ir
 
 	switch cr.Type {
 	case CacheRecordTypeDir:
-		h := sha256.New()
+		digester := depot.NewFastDigester()
 		next := append(k, 0)
 		iter := root.Iterator()
 		iter.SeekLowerBound(append(append([]byte{}, next...), 0))
@@ -914,14 +914,14 @@ func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *ir
 			if !ok || !bytes.HasPrefix(subk, next) {
 				break
 			}
-			h.Write(bytes.TrimPrefix(subk, k))
+			digester.Hash().Write(bytes.TrimPrefix(subk, k))
 
 			subcr, _, err := cc.checksum(ctx, root, txn, m, subk, true)
 			if err != nil {
 				return nil, false, err
 			}
 
-			h.Write([]byte(subcr.Digest))
+			digester.Hash().Write([]byte(subcr.Digest))
 
 			if subcr.Type == CacheRecordTypeDir { // skip subfiles
 				next := append(subk, 0, 0xff)
@@ -930,7 +930,7 @@ func (cc *cacheContext) checksum(ctx context.Context, root *iradix.Node, txn *ir
 			}
 			subk, _, ok = iter.Next()
 		}
-		dgst = digest.NewDigest(digest.SHA256, h)
+		dgst = digester.Digest()
 
 	default:
 		p := string(convertKeyToPath(bytes.TrimSuffix(k, []byte{0})))

@@ -10,10 +10,13 @@ import (
 	"strings"
 
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
+	leasesapi "github.com/containerd/containerd/api/services/leases/v1"
 	"github.com/containerd/containerd/defaults"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	"github.com/moby/buildkit/client/connhelper"
+	"github.com/moby/buildkit/depot"
+	gatewayapi "github.com/moby/buildkit/frontend/gateway/pb"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/grpchijack"
 	"github.com/moby/buildkit/util/appdefaults"
@@ -28,6 +31,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 type Client struct {
@@ -81,6 +85,12 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		}
 		if sd, ok := o.(*withSessionDialer); ok {
 			sessionDialer = sd.dialer
+		}
+
+		// DEPOT: Allow any grpc.DialOption to be passed through.
+		// This is useful for setting gzip, for example.
+		if opt, ok := o.(grpc.DialOption); ok {
+			gopts = append(gopts, opt)
 		}
 	}
 
@@ -143,6 +153,8 @@ func New(ctx context.Context, address string, opts ...ClientOpt) (*Client, error
 		gopts = append(gopts, grpc.WithStreamInterceptor(grpc_middleware.ChainStreamClient(stream...)))
 	}
 
+	gopts = append(gopts, grpc.WithKeepaliveParams(depot.LoadKeepaliveClientParams()))
+
 	conn, err := grpc.DialContext(ctx, address, gopts...)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to dial %q . make sure buildkitd is running", address)
@@ -175,6 +187,18 @@ func (c *Client) ControlClient() controlapi.ControlClient {
 
 func (c *Client) ContentClient() contentapi.ContentClient {
 	return contentapi.NewContentClient(c.conn)
+}
+
+func (c *Client) LeasesClient() leasesapi.LeasesClient {
+	return leasesapi.NewLeasesClient(c.conn)
+}
+
+func (c *Client) LLBBridgeClient() gatewayapi.LLBBridgeClient {
+	return gatewayapi.NewLLBBridgeClient(c.conn)
+}
+
+func (c *Client) HealthClient() grpc_health_v1.HealthClient {
+	return grpc_health_v1.NewHealthClient(c.conn)
 }
 
 func (c *Client) Dialer() session.Dialer {

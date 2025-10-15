@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/solver"
 	"github.com/moby/buildkit/solver/llbsolver/ops/opsutils"
@@ -108,6 +109,10 @@ func (s *SourceOp) Exec(ctx context.Context, g session.Group, _ []solver.Result)
 	ref, err := src.Snapshot(ctx, g)
 	if err != nil {
 		return nil, err
+	}
+	if ref != nil {
+		_ = ref.AppendStringSlice("depot.stableDigests", depot.StableDigests(ctx)...)
+		_ = ref.InsertIfNotExists("depot.vertexDigest", depot.VertexDigest(ctx))
 	}
 	return []solver.Result{worker.NewWorkerRefResult(ref, s.w)}, nil
 }

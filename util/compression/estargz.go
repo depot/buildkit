@@ -13,6 +13,7 @@ import (
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/util/iohelper"
 	digest "github.com/opencontainers/go-digest"
 	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -234,8 +235,8 @@ func calculateBlobInfo() (io.WriteCloser, chan blobInfo) {
 	go func() {
 		defer pr.Close()
 		c := new(iohelper.Counter)
-		dgstr := digest.Canonical.Digester()
-		diffID := digest.Canonical.Digester()
+		dgstr := depot.NewFastDigester()
+		diffID := depot.NewFastDigester()
 		decompressR, err := cdcompression.DecompressStream(io.TeeReader(pr, dgstr.Hash()))
 		if err != nil {
 			pr.CloseWithError(err)

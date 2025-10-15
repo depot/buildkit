@@ -331,7 +331,8 @@ func (o *snapshotter) commit(ctx context.Context, isRemote bool, name, key strin
 	}
 
 	if !isRemote { // skip diskusage for remote snapshots for allowing lazy preparation of nodes
-		du, err := fs.DiskUsage(ctx, o.upperPath(id))
+		var du fs.Usage
+		du, err = fs.DiskUsage(ctx, o.upperPath(id))
 		if err != nil {
 			return err
 		}

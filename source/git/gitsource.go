@@ -18,6 +18,7 @@ import (
 
 	"github.com/moby/buildkit/cache"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/secrets"
@@ -74,9 +75,15 @@ func (gs *gitSource) mountRemote(ctx context.Context, remote string, auth []stri
 		return "", nil, errors.Wrapf(err, "failed to search metadata for %s", urlutil.RedactCredentials(remote))
 	}
 
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
+
 	var remoteRef cache.MutableRef
 	for _, si := range sis {
-		remoteRef, err = gs.cache.GetMutable(ctx, si.ID())
+		remoteRef, err = gs.cache.GetMutable(ctx, si.ID(),
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
 		if err != nil {
 			if errors.Is(err, cache.ErrLocked) {
 				// should never really happen as no other function should access this metadata, but lets be graceful
@@ -90,7 +97,12 @@ func (gs *gitSource) mountRemote(ctx context.Context, remote string, auth []stri
 
 	initializeRepo := false
 	if remoteRef == nil {
-		remoteRef, err = gs.cache.New(ctx, nil, g, cache.CachePolicyRetain, cache.WithDescription(fmt.Sprintf("shared git repo for %s", urlutil.RedactCredentials(remote))))
+		remoteRef, err = gs.cache.New(ctx, nil, g,
+			cache.CachePolicyRetain,
+			cache.WithDescription(fmt.Sprintf("shared git repo for %s", urlutil.RedactCredentials(remote))),
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
 		if err != nil {
 			return "", nil, errors.Wrapf(err, "failed to create new mutable for %s", urlutil.RedactCredentials(remote))
 		}
@@ -365,6 +377,8 @@ func (gs *gitSourceHandler) CacheKey(ctx context.Context, g session.Group, index
 }
 
 func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out cache.ImmutableRef, retErr error) {
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
 	cacheKey := gs.cacheKey
 	if cacheKey == "" {
 		var err error
@@ -385,7 +399,10 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		return nil, errors.Wrapf(err, "failed to search metadata for %s", snapshotKey)
 	}
 	if len(sis) > 0 {
-		return gs.cache.Get(ctx, sis[0].ID(), nil)
+		return gs.cache.Get(ctx, sis[0].ID(), nil,
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
 	}
 
 	gs.locker.Lock(gs.src.Remote)
@@ -460,7 +477,12 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		}
 	}
 
-	checkoutRef, err := gs.cache.New(ctx, nil, g, cache.WithRecordType(client.UsageRecordTypeGitCheckout), cache.WithDescription(fmt.Sprintf("git snapshot for %s#%s", gs.src.Remote, ref)))
+	checkoutRef, err := gs.cache.New(ctx, nil, g,
+		cache.WithRecordType(client.UsageRecordTypeGitCheckout),
+		cache.WithDescription(fmt.Sprintf("git snapshot for %s#%s", gs.src.Remote, ref)),
+		cache.WithStableDigests(stableDigests),
+		cache.WithVertexDigest(vertexDigest),
+	)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create new mutable for %s", urlutil.RedactCredentials(gs.src.Remote))
 	}
@@ -534,6 +556,10 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to checkout remote %s", urlutil.RedactCredentials(gs.src.Remote))
 		}
+		_, err = gitWithinDir(ctx, checkoutDirGit, checkoutDir, sock, knownHosts, nil, "reset", "--hard", "FETCH_HEAD")
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to reset remote %s", urlutil.RedactCredentials(gs.src.Remote))
+		}
 		_, err = gitWithinDir(ctx, checkoutDirGit, "", sock, knownHosts, nil, "remote", "set-url", "origin", urlutil.RedactCredentials(gs.src.Remote))
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to set remote origin to %s", urlutil.RedactCredentials(gs.src.Remote))
@@ -557,6 +583,10 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 		_, err = gitWithinDir(ctx, gitDir, cd, sock, knownHosts, nil, "checkout", ref, "--", ".")
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to checkout remote %s", urlutil.RedactCredentials(gs.src.Remote))
+		}
+		_, err = gitWithinDir(ctx, gitDir, cd, sock, knownHosts, nil, "reset", "--hard", ref)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to reset remote %s", urlutil.RedactCredentials(gs.src.Remote))
 		}
 		if subdir != "." {
 			d, err := os.Open(filepath.Join(cd, subdir))
@@ -609,6 +639,8 @@ func (gs *gitSourceHandler) Snapshot(ctx context.Context, g session.Group) (out 
 	if err != nil {
 		return nil, err
 	}
+	_ = snap.AppendStringSlice("depot.stableDigests", stableDigests...)
+	_ = snap.InsertIfNotExists("depot.vertexDigest", vertexDigest)
 	checkoutRef = nil
 
 	defer func() {

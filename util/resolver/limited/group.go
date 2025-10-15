@@ -3,7 +3,9 @@ package limited
 import (
 	"context"
 	"io"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -20,7 +22,18 @@ type contextKeyT string
 
 var contextKey = contextKeyT("buildkit/util/resolver/limited")
 
-var Default = New(4)
+var Default = New(12)
+
+func init() {
+	if os.Getenv("DEPOT_RESOLVER_CONCURRENCY") != "" {
+		i, err := strconv.Atoi(os.Getenv("DEPOT_RESOLVER_CONCURRENCY"))
+		if err != nil {
+			panic(err)
+		}
+
+		Default = New(i)
+	}
+}
 
 type Group struct {
 	mu   sync.Mutex

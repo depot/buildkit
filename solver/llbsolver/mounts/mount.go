@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/moby/buildkit/depot"
 	"github.com/moby/buildkit/util/bklog"
 
 	"github.com/containerd/containerd/mount"
@@ -101,8 +102,20 @@ func (g *cacheRefGetter) getRefCacheDir(ctx context.Context, ref cache.Immutable
 
 func (g *cacheRefGetter) getRefCacheDirNoCache(ctx context.Context, key string, ref cache.ImmutableRef, id string, block bool) (cache.MutableRef, error) {
 	makeMutable := func(ref cache.ImmutableRef) (cache.MutableRef, error) {
-		return g.cm.New(ctx, ref, g.session, cache.WithRecordType(client.UsageRecordTypeCacheMount), cache.WithDescription(g.name), cache.CachePolicyRetain)
+		stableDigests := depot.StableDigests(ctx)
+		vertexDigest := depot.VertexDigest(ctx)
+
+		return g.cm.New(ctx, ref, g.session,
+			cache.WithRecordType(client.UsageRecordTypeCacheMount),
+			cache.WithDescription(g.name),
+			cache.CachePolicyRetain,
+			cache.WithStableDigests(stableDigests),
+			cache.WithVertexDigest(vertexDigest),
+		)
 	}
+
+	stableDigests := depot.StableDigests(ctx)
+	vertexDigest := depot.VertexDigest(ctx)
 
 	cacheRefsLocker.Lock(key)
 	defer cacheRefsLocker.Unlock(key)
@@ -113,7 +126,8 @@ func (g *cacheRefGetter) getRefCacheDirNoCache(ctx context.Context, key string, 
 		}
 		locked := false
 		for _, si := range sis {
-			if mRef, err := g.cm.GetMutable(ctx, si.ID()); err == nil {
+			mRef, err := g.cm.GetMutable(ctx, si.ID(), cache.WithStableDigests(stableDigests), cache.WithVertexDigest(vertexDigest))
+			if err == nil {
 				bklog.G(ctx).Debugf("reusing ref for cache dir: %s", mRef.ID())
 				return mRef, nil
 			} else if errors.Is(err, cache.ErrLocked) {

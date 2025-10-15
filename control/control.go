@@ -3,16 +3,21 @@ package control
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"connectrpc.com/connect"
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
+	leasesapi "github.com/containerd/containerd/api/services/leases/v1"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/services/content/contentserver"
 	"github.com/docker/distribution/reference"
+	"github.com/gogo/protobuf/types"
 	"github.com/mitchellh/hashstructure/v2"
 	controlapi "github.com/moby/buildkit/api/services/control"
 	apitypes "github.com/moby/buildkit/api/types"
@@ -20,6 +25,9 @@ import (
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/cmd/buildkitd/config"
 	controlgateway "github.com/moby/buildkit/control/gateway"
+	"github.com/moby/buildkit/depot"
+	cloudv3 "github.com/moby/buildkit/depot/api"
+	"github.com/moby/buildkit/depot/api/cloudv3connect"
 	"github.com/moby/buildkit/exporter"
 	"github.com/moby/buildkit/exporter/util/epoch"
 	"github.com/moby/buildkit/frontend"
@@ -37,6 +45,7 @@ import (
 	"github.com/moby/buildkit/version"
 	"github.com/moby/buildkit/worker"
 	digest "github.com/opencontainers/go-digest"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"go.etcd.io/bbolt"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -129,6 +138,40 @@ func (c *Controller) Register(server *grpc.Server) {
 
 	store := &roContentStore{c.opt.ContentStore}
 	contentapi.RegisterContentServer(server, contentserver.New(store))
+	leasesapi.RegisterLeasesServer(server, &LeaseManager{c.opt.LeaseManager})
+}
+
+// DEPOT: This lease manager is used by the CLI to remove image leases after load.
+type LeaseManager struct {
+	manager leases.Manager
+}
+
+func (m *LeaseManager) Delete(ctx context.Context, req *leasesapi.DeleteRequest) (*types.Empty, error) {
+	err := m.manager.Delete(ctx, leases.Lease{ID: req.ID})
+	if err != nil {
+		return nil, err
+	}
+	return &types.Empty{}, nil
+}
+
+func (*LeaseManager) Create(context.Context, *leasesapi.CreateRequest) (*leasesapi.CreateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not yet supported")
+}
+
+func (m *LeaseManager) List(ctx context.Context, req *leasesapi.ListRequest) (*leasesapi.ListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not yet supported")
+}
+
+func (m *LeaseManager) AddResource(context.Context, *leasesapi.AddResourceRequest) (*types.Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "not yet supported")
+}
+
+func (m *LeaseManager) DeleteResource(context.Context, *leasesapi.DeleteResourceRequest) (*types.Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "not yet supported")
+}
+
+func (m *LeaseManager) ListResources(ctx context.Context, req *leasesapi.ListResourcesRequest) (*leasesapi.ListResourcesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not yet supported")
 }
 
 func (c *Controller) DiskUsage(ctx context.Context, r *controlapi.DiskUsageRequest) (*controlapi.DiskUsageResponse, error) {
@@ -148,17 +191,20 @@ func (c *Controller) DiskUsage(ctx context.Context, r *controlapi.DiskUsageReque
 		for _, r := range du {
 			resp.Record = append(resp.Record, &controlapi.UsageRecord{
 				// TODO: add worker info
-				ID:          r.ID,
-				Mutable:     r.Mutable,
-				InUse:       r.InUse,
-				Size_:       r.Size,
-				Parents:     r.Parents,
-				UsageCount:  int64(r.UsageCount),
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				ID:            r.ID,
+				Mutable:       r.Mutable,
+				InUse:         r.InUse,
+				Size_:         r.Size,
+				Inodes:        r.Inodes,
+				Parents:       r.Parents,
+				UsageCount:    int64(r.UsageCount),
+				Description:   r.Description,
+				CreatedAt:     r.CreatedAt,
+				LastUsedAt:    r.LastUsedAt,
+				RecordType:    string(r.RecordType),
+				Shared:        r.Shared,
+				StableDigests: r.StableDigests,
+				CreatorDigest: r.CreatorDigest,
 			})
 		}
 	}
@@ -216,17 +262,20 @@ func (c *Controller) Prune(req *controlapi.PruneRequest, stream controlapi.Contr
 			didPrune = true
 			if err := stream.Send(&controlapi.UsageRecord{
 				// TODO: add worker info
-				ID:          r.ID,
-				Mutable:     r.Mutable,
-				InUse:       r.InUse,
-				Size_:       r.Size,
-				Parents:     r.Parents,
-				UsageCount:  int64(r.UsageCount),
-				Description: r.Description,
-				CreatedAt:   r.CreatedAt,
-				LastUsedAt:  r.LastUsedAt,
-				RecordType:  string(r.RecordType),
-				Shared:      r.Shared,
+				ID:            r.ID,
+				Mutable:       r.Mutable,
+				InUse:         r.InUse,
+				Size_:         r.Size,
+				Inodes:        r.Inodes,
+				Parents:       r.Parents,
+				UsageCount:    int64(r.UsageCount),
+				Description:   r.Description,
+				CreatedAt:     r.CreatedAt,
+				LastUsedAt:    r.LastUsedAt,
+				RecordType:    string(r.RecordType),
+				Shared:        r.Shared,
+				StableDigests: r.StableDigests,
+				CreatorDigest: r.CreatorDigest,
 			}); err != nil {
 				return err
 			}
@@ -308,6 +357,9 @@ func translateLegacySolveRequest(req *controlapi.SolveRequest) error {
 func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*controlapi.SolveResponse, error) {
 	atomic.AddInt64(&c.buildCount, 1)
 	defer atomic.AddInt64(&c.buildCount, -1)
+
+	spiffeID := depot.SpiffeFromContext(ctx)
+	bearer := depot.BearerFromEnv()
 
 	// This method registers job ID in solver.Solve. Make sure there are no blocking calls before that might delay this.
 
@@ -430,7 +482,48 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		procs = append(procs, proc.ProvenanceProcessor(attrs))
 	}
 
-	resp, err := c.solver.Solve(ctx, req.Ref, req.Session, frontend.SolveRequest{
+	// DEPOT: metadata contains information such as the dockerfile.
+	metadata := map[string][]byte{}
+	copyMetadata := func(ctx context.Context, result *llbsolver.Result, s *llbsolver.Solver, j *solver.Job) (*llbsolver.Result, error) {
+		for k, v := range result.Metadata {
+			metadata[k] = v
+		}
+		return result, nil
+	}
+	procs = append(procs, copyMetadata)
+
+	// DEPOT: send source dockerfile to the API in the background, if it exists.
+	tryReportDockerfile := func() {
+		ctx := context.Background()
+
+		buildTarget, ok := req.FrontendAttrs[depot.BuildArgTarget]
+		if !ok {
+			return
+		}
+
+		name, ok := metadata[depot.BuildDockerfileName]
+		if !ok {
+			return
+		}
+
+		contents, ok := metadata[depot.BuildDockerfile]
+		if !ok {
+			return
+		}
+
+		req := &depot.BuildContextRequest{
+			SpiffeID:       spiffeID,
+			Bearer:         bearer,
+			BuildTarget:    buildTarget,
+			DockerfileName: string(name),
+			Contents:       string(contents),
+		}
+
+		depot.SendBuildContext(ctx, req)
+	}
+
+	ctx = depot.WithSpiffe(ctx, spiffeID)
+	resp, sboms, err := c.solver.Solve(ctx, req.Ref, req.Session, frontend.SolveRequest{
 		Frontend:       req.Frontend,
 		Definition:     req.Definition,
 		FrontendOpt:    req.FrontendAttrs,
@@ -442,31 +535,157 @@ func (c *Controller) Solve(ctx context.Context, req *controlapi.SolveRequest) (*
 		Type:           req.Exporter,
 		Attrs:          req.ExporterAttrs,
 	}, req.Entitlements, procs, req.Internal, req.SourcePolicy)
+	go tryReportDockerfile()
 	if err != nil {
 		return nil, err
 	}
+
+	// DEPOT: send SBOMs to the API in the background.
+	go func() {
+		ctx := context.Background()
+
+		if sboms == nil || spiffeID == "" || bearer == "" {
+			return
+		}
+
+		apiSBOMs := []*cloudv3.SBOM{}
+		for _, sbom := range sboms {
+			desc := ocispecs.Descriptor{Digest: digest.Digest(sbom.Digest)}
+			statement, err := content.ReadBlob(ctx, c.opt.ContentStore, desc)
+			if err != nil {
+				bklog.G(ctx).WithError(err).Errorf("unable to read SBOM blob")
+				continue
+			}
+
+			apiSBOM := &cloudv3.SBOM{
+				Platform: sbom.Platform,
+				SpdxJson: string(statement),
+				Digest:   sbom.Digest,
+			}
+			if sbom.Image != nil {
+				apiSBOM.Image = &cloudv3.Image{
+					Name:           sbom.Image.Name,
+					ManifestDigest: sbom.Image.ManifestDigest,
+				}
+			}
+
+			apiSBOMs = append(apiSBOMs, apiSBOM)
+		}
+
+		req := connect.NewRequest(&cloudv3.ReportSBOMRequest{
+			SpiffeId: spiffeID,
+			Sboms:    apiSBOMs,
+		})
+		req.Header().Add("Authorization", bearer)
+
+		attempts := 0
+		for {
+			attempts++
+			_, err := NewDepotClient().ReportSBOM(ctx, req)
+			if err == nil {
+				break
+			}
+
+			if attempts > 10 {
+				bklog.G(ctx).WithError(err).Errorf("unable to send SBOM to API, giving up")
+				return
+			}
+
+			bklog.G(ctx).WithError(err).Errorf("unable to send SBOM to API, retrying")
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+
 	return &controlapi.SolveResponse{
 		ExporterResponse: resp.ExporterResponse,
 	}, nil
 }
 
 func (c *Controller) Status(req *controlapi.StatusRequest, stream controlapi.Control_StatusServer) error {
+	ctx := stream.Context()
+	bklog.G(ctx).WithField("ref", req.Ref).Info("Build status started")
+	defer func() {
+		bklog.G(ctx).WithField("ref", req.Ref).Info("Build status finished")
+	}()
+
+	spiffeID := depot.SpiffeFromContext(ctx)
+	bearer := depot.BearerFromEnv()
+
+	statusCh := make(chan client.SolveStatus, 1024)
+
 	if err := sendTimestampHeader(stream); err != nil {
 		return err
 	}
 	ch := make(chan *client.SolveStatus, 8)
 
-	eg, ctx := errgroup.WithContext(stream.Context())
+	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		return c.solver.Status(ctx, req.Ref, ch)
 	})
 
+	go func() {
+		if spiffeID == "" || bearer == "" {
+			return
+		}
+
+		sender := NewDepotClient().ReportStatus(context.Background())
+		sender.RequestHeader().Add("Authorization", bearer)
+		defer func() {
+			_, _ = sender.CloseAndReceive()
+		}()
+
+		for ss := range statusCh {
+			for _, sr := range ss.Marshal() {
+				stableDigests := make(map[string]string, len(sr.Vertexes))
+				for _, v := range sr.Vertexes {
+					stableDigests[v.Digest.String()] = v.StableDigest.String()
+				}
+				req := &cloudv3.ReportStatusRequest{
+					SpiffeId:      spiffeID,
+					Status:        sr,
+					StableDigests: stableDigests,
+				}
+
+				attempts := 0
+				for {
+					attempts++
+					err := sender.Send(req)
+					if err == nil {
+						break
+					}
+
+					if attempts > 10 {
+						bklog.G(ctx).WithError(err).Errorf("unable to send status to API, giving up")
+						return
+					}
+
+					bklog.G(ctx).WithError(err).Errorf("unable to send status to API, retrying")
+					time.Sleep(100 * time.Millisecond)
+					_, _ = sender.CloseAndReceive()
+					sender = NewDepotClient().ReportStatus(ctx)
+					sender.RequestHeader().Add("Authorization", bearer)
+				}
+			}
+		}
+	}()
+
 	eg.Go(func() error {
+		defer close(statusCh)
+
 		for {
 			ss, ok := <-ch
 			if !ok {
 				return nil
 			}
+
+			// DEPOT: we need to make a copy because ss.Marshal() mutates the SolveStatus
+			if spiffeID != "" && bearer != "" && ss != nil {
+				select {
+				case statusCh <- *ss:
+				default:
+				}
+			}
+
 			for _, sr := range ss.Marshal() {
 				if err := stream.SendMsg(sr); err != nil {
 					return err
@@ -668,4 +887,12 @@ const timestampKey = "buildkit-current-timestamp"
 
 func sendTimestampHeader(srv grpc.ServerStream) error {
 	return srv.SendHeader(metadata.Pairs(timestampKey, time.Now().Format(time.RFC3339Nano)))
+}
+
+func NewDepotClient() cloudv3connect.MachineServiceClient {
+	baseURL := os.Getenv("DEPOT_API_URL")
+	if baseURL == "" {
+		baseURL = "https://api.depot.dev"
+	}
+	return cloudv3connect.NewMachineServiceClient(http.DefaultClient, baseURL)
 }

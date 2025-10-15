@@ -1,3 +1,7 @@
+# connectrpc.com/connect v1.11.1
+## explicit; go 1.19
+connectrpc.com/connect
+connectrpc.com/connect/internal/gen/connectext/grpc/status/v1
 # github.com/Azure/azure-sdk-for-go/sdk/azcore v1.1.0
 ## explicit; go 1.18
 github.com/Azure/azure-sdk-for-go/sdk/azcore
@@ -318,7 +322,7 @@ github.com/containerd/go-runc
 github.com/containerd/nydus-snapshotter/pkg/converter
 github.com/containerd/nydus-snapshotter/pkg/converter/tool
 github.com/containerd/nydus-snapshotter/pkg/errdefs
-# github.com/containerd/stargz-snapshotter v0.13.0
+# github.com/containerd/stargz-snapshotter v0.13.0 => github.com/depot/stargz-snapshotter v0.13.0-depot.1
 ## explicit; go 1.16
 github.com/containerd/stargz-snapshotter/cache
 github.com/containerd/stargz-snapshotter/fs
@@ -558,12 +562,19 @@ github.com/jmespath/go-jmespath
 # github.com/klauspost/compress v1.15.12
 ## explicit; go 1.17
 github.com/klauspost/compress
+github.com/klauspost/compress/flate
 github.com/klauspost/compress/fse
 github.com/klauspost/compress/huff0
 github.com/klauspost/compress/internal/cpuinfo
 github.com/klauspost/compress/internal/snapref
 github.com/klauspost/compress/zstd
 github.com/klauspost/compress/zstd/internal/xxhash
+# github.com/klauspost/cpuid/v2 v2.0.4
+## explicit; go 1.13
+github.com/klauspost/cpuid/v2
+# github.com/klauspost/pgzip v1.2.5
+## explicit
+github.com/klauspost/pgzip
 # github.com/kylelemons/godebug v1.1.0
 ## explicit; go 1.11
 github.com/kylelemons/godebug/diff
@@ -571,6 +582,9 @@ github.com/kylelemons/godebug/pretty
 # github.com/matttproud/golang_protobuf_extensions v1.0.4
 ## explicit; go 1.9
 github.com/matttproud/golang_protobuf_extensions/pbutil
+# github.com/minio/sha256-simd v1.0.0
+## explicit; go 1.13
+github.com/minio/sha256-simd
 # github.com/mitchellh/hashstructure/v2 v2.0.2
 ## explicit; go 1.14
 github.com/mitchellh/hashstructure/v2
@@ -887,7 +901,7 @@ google.golang.org/grpc/serviceconfig
 google.golang.org/grpc/stats
 google.golang.org/grpc/status
 google.golang.org/grpc/tap
-# google.golang.org/protobuf v1.28.1
+# google.golang.org/protobuf v1.31.0
 ## explicit; go 1.11
 google.golang.org/protobuf/cmd/protoc-gen-go/internal_gengo
 google.golang.org/protobuf/compiler/protogen
@@ -908,6 +922,7 @@ google.golang.org/protobuf/internal/filetype
 google.golang.org/protobuf/internal/flags
 google.golang.org/protobuf/internal/genid
 google.golang.org/protobuf/internal/impl
+google.golang.org/protobuf/internal/msgfmt
 google.golang.org/protobuf/internal/order
 google.golang.org/protobuf/internal/pragma
 google.golang.org/protobuf/internal/set
@@ -915,11 +930,14 @@ google.golang.org/protobuf/internal/strs
 google.golang.org/protobuf/internal/version
 google.golang.org/protobuf/proto
 google.golang.org/protobuf/reflect/protodesc
+google.golang.org/protobuf/reflect/protopath
+google.golang.org/protobuf/reflect/protorange
 google.golang.org/protobuf/reflect/protoreflect
 google.golang.org/protobuf/reflect/protoregistry
 google.golang.org/protobuf/runtime/protoiface
 google.golang.org/protobuf/runtime/protoimpl
 google.golang.org/protobuf/types/descriptorpb
+google.golang.org/protobuf/types/dynamicpb
 google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
 google.golang.org/protobuf/types/known/fieldmaskpb
@@ -929,3 +947,4 @@ google.golang.org/protobuf/types/pluginpb
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+# github.com/containerd/stargz-snapshotter => github.com/depot/stargz-snapshotter v0.13.0-depot.1

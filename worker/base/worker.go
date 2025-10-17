@@ -313,11 +313,15 @@ func (w *Worker) ResolveOp(v solver.Vertex, s frontend.FrontendLLBBridge, sm *se
 	if baseOp, ok := v.Sys().(*pb.Op); ok {
 		switch op := baseOp.Op.(type) {
 		case *pb.Op_Source:
-			return ops.NewSourceOp(v, op, baseOp.Platform, w.SourceManager, w.ParallelismSem, sm, w)
+			// DEPOT: no need to restrict parallelism for source download.
+			var infiniteParallelism *semaphore.Weighted
+			return ops.NewSourceOp(v, op, baseOp.Platform, w.SourceManager, infiniteParallelism, sm, w)
 		case *pb.Op_Exec:
 			return ops.NewExecOp(v, op, baseOp.Platform, w.CacheMgr, w.ParallelismSem, sm, w.WorkerOpt.Executor, w)
 		case *pb.Op_File:
-			return ops.NewFileOp(v, op, w.CacheMgr, w.ParallelismSem, w)
+			// DEPOT: no need to restrict parallelism for file copy.
+			var infiniteParallelism *semaphore.Weighted
+			return ops.NewFileOp(v, op, w.CacheMgr, infiniteParallelism, w)
 		case *pb.Op_Build:
 			return ops.NewBuildOp(v, op, s, w)
 		case *pb.Op_Merge:
